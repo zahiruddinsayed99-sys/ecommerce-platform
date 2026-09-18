@@ -21,7 +21,10 @@ from app.modules.orders.models.order import (
 )
 from datetime import UTC
 import uuid
+import razorpay
 
+from app.core.config import settings
+from app.modules.orders.schemas.order_request import ConfirmPaymentRequest
 
 class OrderService:
     def __init__(
@@ -96,11 +99,20 @@ class OrderService:
                 status_code=400, detail="Only PENDING orders can be checked out"
             )
 
-        # Simulate generating a checkout token
-        checkout_token = f"tok_sandbox_{uuid.uuid4().hex}"
-        return checkout_token
+        client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
-    def confirm_payment(self, order_id: UUID, current_user_id: UUID) -> Order:
+        try:
+            razorpay_order = client.order.create({
+                "amount": int(order.total_amount * 100),
+                "currency": "INR",
+                "receipt": str(order_id)
+            })
+            return razorpay_order["id"]
+        except Exception as e:
+            logger.error(f"Razorpay order creation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Payment gateway error")
+
+    def confirm_payment(self, order_id: UUID, current_user_id: UUID, payload: ConfirmPaymentRequest) -> Order:
         order = self.order_repo.get_order_by_id(order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -113,10 +125,21 @@ class OrderService:
                 status_code=400, detail="Only PENDING orders can be confirmed"
             )
 
+        client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+        try:
+            client.utility.verify_payment_signature({
+                "razorpay_order_id": payload.razorpay_order_id,
+                "razorpay_payment_id": payload.razorpay_payment_id,
+                "razorpay_signature": payload.razorpay_signature
+            })
+        except razorpay.errors.SignatureVerificationError:
+            raise HTTPException(status_code=400, detail="Invalid payment signature")
+
         # Atomically transition order status from Pending to Processing
-        # (Assuming payment simulation succeeds)
         order.payment_status = PaymentStatus.PAID
         order.payment_date = datetime.now(UTC)
+        order.payment_reference = payload.razorpay_payment_id
         updated_order = self.update_order_status(order_id, OrderStatus.PROCESSING)
         return updated_order
 

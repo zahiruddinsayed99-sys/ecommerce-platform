@@ -35,3 +35,9 @@ class CreateOrderRequest(BaseModel):
 
 class OrderStatusUpdateRequest(BaseModel):
     status: OrderStatus
+
+
+class ConfirmPaymentRequest(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str

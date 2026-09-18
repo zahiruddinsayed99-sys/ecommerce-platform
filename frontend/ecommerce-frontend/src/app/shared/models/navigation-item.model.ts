@@ -3,4 +3,5 @@ export interface NavigationItem {
   icon: string;
   route: string;
   enabled: boolean;
+  requiredRole?: string;
 }

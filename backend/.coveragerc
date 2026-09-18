@@ -1,0 +1,5 @@
+[run]
+omit =
+    app/main.py
+    app/database/session.py
+    app/database/seeds/seed_service.py

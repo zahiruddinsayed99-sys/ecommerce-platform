@@ -19,3 +19,11 @@ postgres_data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Playwright
+*.deb
+playwright-report/
+test-results/
+playwright/.cache/
+blob-report/
+.coverage

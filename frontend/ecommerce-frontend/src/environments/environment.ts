@@ -8,6 +8,7 @@ export const environment = {
   api: {
     baseUrl: 'http://localhost:8000/api/v1',
     timeout: 30000,
+    razorpayKeyId: 'rzp_test_TOposJGj3ledXf'
   },
   customerRoleId: 'feb417c8-eb19-41e9-9ac9-f0ee08246ad2',
   auth: {

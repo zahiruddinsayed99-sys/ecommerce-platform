@@ -1,15 +1,5 @@
-/**
- * ============================================================
- * Enterprise E-Commerce Platform
- * Development Environment
- * ============================================================
- *
- * Used only during development.
- */
-
 export const environment = {
   production: false,
-
   app: {
     name: 'Enterprise E-Commerce Platform',
     version: '1.0.0',
@@ -18,11 +8,13 @@ export const environment = {
   api: {
     baseUrl: 'http://localhost:8000/api/v1',
     timeout: 30000,
+    razorpayKeyId: 'rzp_test_TOposJGj3ledXf'
   },
   customerRoleId: 'feb417c8-eb19-41e9-9ac9-f0ee08246ad2',
+  auth: {
+    accessTokenKey: 'access_token',
 
-  http: {
-    timeout: 30000,
+    refreshTokenKey: 'refresh_token',
   },
 
   logging: {
@@ -32,7 +24,9 @@ export const environment = {
 
   features: {
     enableCaching: true,
+
     enableNotifications: true,
-    enableDarkTheme: true,
+
+    enableDarkTheme: false,
   },
 } as const;

@@ -47,7 +47,7 @@ export class AuthService {
 
   fetchProfile(): Observable<User> {
     return this.http.get<User>(API_CONSTANTS.AUTH.PROFILE).pipe(
-      tap(user => this.currentUserSubject.next(user))
+      tap(user => { if (user.role) { this.storage.setRole(user.role); } this.currentUserSubject.next(user); })
     );
   }
 

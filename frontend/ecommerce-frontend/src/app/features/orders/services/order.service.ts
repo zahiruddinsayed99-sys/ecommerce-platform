@@ -67,10 +67,10 @@ export class OrderService {
         );
     }
 
-    confirmPayment(orderId: string): Observable<OrderResponseApi> {
+    confirmPayment(orderId: string, payload: { razorpay_payment_id: string, razorpay_order_id: string, razorpay_signature: string }): Observable<OrderResponseApi> {
         return this.http.post<OrderResponseApi>(
             `${this.apiUrl}/${orderId}/confirm-payment`,
-            {}
+            payload
         );
     }
 

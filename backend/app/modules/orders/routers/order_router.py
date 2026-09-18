@@ -6,7 +6,7 @@ from app.database.session import get_db  # standard pattern dependency
 from app.modules.auth.dependencies import (
     require_customer,
 )
-from app.modules.orders.schemas.order_request import CreateOrderRequest
+from app.modules.orders.schemas.order_request import CreateOrderRequest, ConfirmPaymentRequest
 from app.modules.orders.schemas.order_response import OrderResponse, OrderDetailResponse, CheckoutSessionResponse
 from app.modules.orders.services.order_service import OrderService
 from app.modules.orders.repositories.order_repository import OrderRepository
@@ -94,7 +94,8 @@ def create_checkout_session(
 )
 def confirm_payment(
     order_id: UUID,
+    request: ConfirmPaymentRequest,
     current_user=Depends(require_customer),
     service: OrderService = Depends(get_order_service),
 ):
-    return service.confirm_payment(order_id=order_id, current_user_id=current_user.id)
+    return service.confirm_payment(order_id=order_id, current_user_id=current_user.id, payload=request)

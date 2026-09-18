@@ -1,49 +1,50 @@
-<nav class="app-sidenav" aria-label="Primary Navigation">
-  <!-- Navigation List -->
-  <mat-nav-list>
-    <ng-container *ngFor="let item of navigationItems; trackBy: trackByRoute">
-      <!-- Enabled Navigation Item -->
+<mat-nav-list class="sidenav-list" role="navigation">
+  <ng-container *ngFor="let item of navigationItems; trackBy: trackByItem">
+    <ng-container *ngIf="canAccess(item)">
       <a
-        *ngIf="item.enabled; else disabledMenuItem"
         mat-list-item
-        class="nav-item"
+        *ngIf="isEnabled(item)"
         [routerLink]="item.route"
         routerLinkActive="active"
-        [routerLinkActiveOptions]="{ exact: true }"
+        [class.active]="isRouteActive(item.route)"
+        (click)="onItemClick(item)"
+        class="nav-item"
+        [attr.aria-label]="item.label"
+        matRipple
+        [matRippleColor]="'rgba(0, 0, 0, 0.05)'"
       >
-        <mat-icon matListItemIcon aria-hidden="true">
+        <mat-icon
+          matListItemIcon
+          class="nav-icon"
+          [class.active-icon]="isRouteActive(item.route)"
+        >
           {{ item.icon }}
         </mat-icon>
 
-        <span matListItemTitle>
+        <span
+          matListItemTitle
+          class="nav-label"
+          [class.active-label]="isRouteActive(item.route)"
+        >
           {{ item.label }}
-        </span>
-
-        <span *ngIf="item.badge" matListItemMeta class="menu-badge">
-          {{ item.badge }}
         </span>
       </a>
 
-      <!-- Disabled Navigation Item -->
-      <ng-template #disabledMenuItem>
-        <button
-          mat-list-item
-          class="nav-item disabled"
-          type="button"
-          disabled
-          matTooltip="Coming Soon"
-        >
-          <mat-icon matListItemIcon aria-hidden="true">
-            {{ item.icon }}
-          </mat-icon>
-
-          <span matListItemTitle>
-            {{ item.label }}
-          </span>
-
-          <span matListItemMeta class="coming-soon"> Coming Soon </span>
-        </button>
-      </ng-template>
+      <!-- Disabled State (Optional, but kept for visual consistency if needed) -->
+      <div
+        mat-list-item
+        *ngIf="!isEnabled(item)"
+        class="nav-item disabled-nav-item"
+        [attr.aria-disabled]="true"
+        [attr.aria-label]="item.label + ' (Disabled)'"
+      >
+        <mat-icon matListItemIcon class="nav-icon disabled-icon">{{
+          item.icon
+        }}</mat-icon>
+        <span matListItemTitle class="nav-label disabled-label">{{
+          item.label
+        }}</span>
+      </div>
     </ng-container>
-  </mat-nav-list>
-</nav>
+  </ng-container>
+</mat-nav-list>

@@ -1,60 +1,66 @@
-import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
-
+import { Component, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
+
 import { MatListModule } from '@angular/material/list';
 import { MatIconModule } from '@angular/material/icon';
-import { MatButtonModule } from '@angular/material/button';
-import { MatTooltipModule } from '@angular/material/tooltip';
-import { NavigationItem } from '../models/navigation-item';
+import { MatRippleModule } from '@angular/material/core';
+
+import { NavigationItem } from '../../shared/models/navigation-item.model';
 import { NAVIGATION_ITEMS } from '../layout.config';
+import { LayoutService } from '../services/layout.service';
+import { StorageService } from '../../core/services/storage.service';
 
 @Component({
   selector: 'app-sidenav',
-
   standalone: true,
-
-  imports: [
-    CommonModule,
-    RouterModule,
-    MatListModule,
-    MatIconModule,
-    MatButtonModule,
-    MatTooltipModule,
-  ],
-
+  imports: [CommonModule, RouterModule, MatListModule, MatIconModule, MatRippleModule],
   templateUrl: './sidenav.component.html',
-
   styleUrls: ['./sidenav.component.scss'],
-
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SidenavComponent {
-  /**
-   * Current navigation configuration.
-   * All future modules should be added in layout.config.ts
-   */
+  @Input() isMobile = false;
+
+  private readonly router = inject(Router);
+
+  private readonly layoutService = inject(LayoutService);
+
+  private readonly storageService = inject(StorageService);
+
   readonly navigationItems: NavigationItem[] = NAVIGATION_ITEMS;
 
-  /**
-   * Indicates whether the application is currently running
-   * in mobile mode. Used by the template to optionally
-   * adjust behaviour.
-   */
-  @Input()
-  isMobile = false;
+  canAccess(item: NavigationItem): boolean {
+    if (!item.requiredRole) {
+      return true;
+    }
+    const role = this.storageService.getRole();
+    return !!role && role.toUpperCase() === item.requiredRole.toUpperCase();
+  }
 
-  /**
-   * TrackBy improves rendering performance.
-   */
-  trackByRoute(index: number, item: NavigationItem): string {
+  trackByItem(index: number, item: NavigationItem): string {
     return item.route;
   }
 
-  /**
-   * Returns true when menu item can navigate.
-   */
+  isRouteActive(route: string): boolean {
+    return this.router.isActive(route, {
+      paths: 'exact',
+      queryParams: 'exact',
+      fragment: 'ignored',
+      matrixParams: 'ignored',
+    });
+  }
+
   isEnabled(item: NavigationItem): boolean {
     return item.enabled;
+  }
+
+  onItemClick(item: NavigationItem): void {
+    if (!item.enabled) {
+      return;
+    }
+
+    if (this.isMobile) {
+      this.layoutService.close();
+    }
   }
 }

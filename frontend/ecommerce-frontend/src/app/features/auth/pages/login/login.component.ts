@@ -15,6 +15,7 @@ import { MatIconModule } from '@angular/material/icon';
 
 import { AuthService } from '../../../../core/auth/services/auth.service';
 import { LoggerService } from '../../../../core/services/logger.service';
+import { StorageService } from '../../../../core/services/storage.service';
 
 // Enterprise Design System components
 import { PageContainerComponent } from '../../../../layout/page-container/page-container.component';
@@ -58,6 +59,8 @@ export class LoginComponent implements OnInit {
 
   private readonly logger = inject(LoggerService);
 
+  private readonly storage = inject(StorageService);
+
   private readonly destroyRef = inject(DestroyRef);
 
   // Presentation-only signals
@@ -89,11 +92,24 @@ export class LoginComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.logger.info('User authenticated.');
+          this.logger.info('User authenticated, fetching profile.');
 
-          this.loading.set(false);
-
-          this.router.navigate(['/products']);
+          this.authService.fetchProfile().subscribe({
+            next: () => {
+              this.loading.set(false);
+              const role = this.storage.getRole();
+              if (role && role.toUpperCase() === 'ADMIN') {
+                this.router.navigate(['/admin/orders']);
+              } else {
+                this.router.navigate(['/products']);
+              }
+            },
+            error: err => {
+              this.logger.error('Failed to fetch profile.', err);
+              this.error.set('Could not fetch user profile.');
+              this.loading.set(false);
+            }
+          });
         },
 
         error: error => {
