@@ -1,5 +1,5 @@
 export const environment = {
-  production: false,
+  production: true,
   app: {
     name: 'Enterprise E-Commerce Platform',
     version: '1.0.0',
@@ -9,7 +9,7 @@ export const environment = {
     // This should point to your live backend server (e.g., AWS, DigitalOcean, Heroku)
     // Must match the live backend server URL above
     //baseUrl: 'https://api.your-production-domain.com/api',     
-    baseUrl: 'http://localhost:8000/api/v1',
+    baseUrl: 'https://ecommerce-platform-vk7x.onrender.com/api/v1',
     timeout: 30000,
     razorpayKeyId: 'rzp_test_TOposJGj3ledXf'
   },

@@ -43,6 +43,57 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
+    # 1. Create products table first so foreign keys can reference it
+    if not inspector.has_table("products"):
+        op.create_table(
+            "products",
+            sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("name", sa.String(length=255), nullable=False),
+            sa.Column("description", sa.Text(), nullable=True),
+            sa.Column("price", sa.Numeric(precision=12, scale=2), nullable=False),
+            sa.Column("category_id", postgresql.UUID(as_uuid=True), nullable=True),
+            sa.Column("is_active", sa.Boolean(), server_default="true", nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=True,
+            ),
+            sa.PrimaryKeyConstraint("id"),
+        )
+
+    # 2. Create orders table if missing (needed for later migrations)
+    if not inspector.has_table("orders"):
+        op.create_table(
+            "orders",
+            sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("total_amount", sa.Numeric(precision=12, scale=2), nullable=False),
+            sa.Column("status", sa.String(length=50), server_default="PENDING", nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=True,
+            ),
+            sa.PrimaryKeyConstraint("id"),
+        )
+
+    # 3. Create order_items table if missing
+    if not inspector.has_table("order_items"):
+        op.create_table(
+            "order_items",
+            sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("order_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("product_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("quantity", sa.Integer(), nullable=False),
+            sa.Column("unit_price", sa.Numeric(precision=12, scale=2), nullable=False),
+            sa.ForeignKeyConstraint(["order_id"], ["orders.id"]),
+            sa.ForeignKeyConstraint(["product_id"], ["products.id"]),
+            sa.PrimaryKeyConstraint("id"),
+        )
+
+    # 4. Create inventory table (which references products.id safely now)
     if not inspector.has_table("inventory"):
         op.create_table(
             "inventory",
