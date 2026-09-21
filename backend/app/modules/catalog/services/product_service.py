@@ -42,7 +42,12 @@ class ProductService:
         db.commit()
         db.refresh(product)
 
-        redis_client.delete(self.CACHE_KEY)
+        try:
+            if redis_client:
+                redis_client.delete(self.CACHE_KEY)
+        except Exception as e:
+            print(f"Redis cache delete warning: {e}")
+
         return product
 
     def get_products(
@@ -56,11 +61,19 @@ class ProductService:
         size=20,
     ):
 
-        cached = redis_client.get(self.CACHE_KEY)
+        cached = None
+        try:
+            if redis_client:
+                cached = redis_client.get(self.CACHE_KEY)
+        except Exception as e:
+            print(f"Redis cache get warning: {e}")
 
         if cached:
-            # print("CACHE HIT")
-            return json.loads(cached)
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
         products = self.product_repo.get_products(
             db=db,
             category=category,
@@ -89,7 +102,11 @@ class ProductService:
             for p in products
         ]
 
-        redis_client.set(self.CACHE_KEY, json.dumps(serialized), ex=300)
+        try:
+            if redis_client:
+                redis_client.set(self.CACHE_KEY, json.dumps(serialized), ex=300)
+        except Exception as e:
+            print(f"Redis cache set warning: {e}")
 
         return serialized
 
@@ -149,7 +166,11 @@ class ProductService:
 
         db.refresh(product)
 
-        redis_client.delete(self.CACHE_KEY)
+        try:
+            if redis_client:
+                redis_client.delete(self.CACHE_KEY)
+        except Exception as e:
+            print(f"Redis cache delete warning: {e}")
 
         return product
 
@@ -159,4 +180,8 @@ class ProductService:
 
         db.commit()
 
-        redis_client.delete(self.CACHE_KEY)
+        try:
+            if redis_client:
+                redis_client.delete(self.CACHE_KEY)
+        except Exception as e:
+            print(f"Redis cache delete warning: {e}")
