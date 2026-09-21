@@ -39,7 +39,7 @@ class ProductRepository:
         query = query.filter(Product.is_active.is_(True))
 
         if category:
-            query = query.filter(Product.category == category)
+                query = query.filter(Product.category_id == category)
 
         if search:
             query = query.filter(Product.name.ilike(f"%{search}%"))

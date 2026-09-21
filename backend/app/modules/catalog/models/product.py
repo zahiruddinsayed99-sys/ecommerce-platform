@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import String, Text, Numeric, Boolean, DateTime
+from sqlalchemy import String, Text, Numeric, Boolean, DateTime, ForeignKey
 
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
@@ -23,11 +23,10 @@ class Product(Base):
 
     description: Mapped[str] = mapped_column(Text, nullable=True)
 
-    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("categories.id"), nullable=False
+    )
 
-    # Mapping fix: column already exists in DB (migration d8a6f0b93c41) but
-    # was never mapped on the ORM model — reads/writes of Product.sku were
-    # silently unavailable until now.
     sku: Mapped[str | None] = mapped_column(
         String(64), unique=True, nullable=True, index=True
     )
@@ -44,4 +43,5 @@ class Product(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    category = relationship("Category", backref="products")
     inventory = relationship("Inventory", back_populates="product", uselist=False)
