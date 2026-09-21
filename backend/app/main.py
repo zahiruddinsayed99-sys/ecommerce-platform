@@ -27,13 +27,7 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 # Register CORS Middleware FIRST so headers are always attached
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:4200",
-        "http://127.0.0.1:4200",
-        "http://localhost:8000",
-        "https://ecommerce-platform-app-sable.vercel.app",
-        "https://ecommerce-platform-vk7x.onrender.com",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
