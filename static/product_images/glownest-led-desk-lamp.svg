@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <linearGradient id="bg-grad-home" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0FDF4"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <rect width="320" height="200" rx="14" fill="url(#bg-grad-home)"/>
+  <g filter="url(#shadow)">
+    
+        <!-- Coffee Maker / Home Appliance -->
+        <path d="M110 35 L210 35 L210 150 Q210 160 200 160 L120 160 Q110 160 110 150 Z" fill="#10B981" stroke="#047857" stroke-width="3.5"/>
+        <rect x="130" y="50" width="60" height="20" rx="4" fill="#FFFFFF" opacity="0.9"/>
+        <path d="M125 90 L195 90 L185 140 Q185 145 180 145 L140 145 Q135 145 135 140 Z" fill="#FFFFFF" stroke="#047857" stroke-width="2.5"/>
+        <circle cx="160" cy="115" r="8" fill="#047857" opacity="0.4"/>
+    
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="20" y="164" width="280" height="26" rx="13.0" fill="#FFFFFF" fill-opacity="0.94" stroke="#10B981" stroke-opacity="0.2" stroke-width="1"/>
+    <text x="160" y="181" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#1E293B" text-anchor="middle">GlowNest LED Desk Lamp</text>
+  </g>
+</svg>
