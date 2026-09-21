@@ -84,24 +84,24 @@ class ProductService:
             size=size,
         )
         serialized = [
-            {
-                "id": str(p.id),
-                "name": p.name,
-                "description": p.description,
-                "category": p.category.name if p.category else None,
-                "category_id": str(p.category_id),
-                "price": float(p.price),
-                "stock_quantity": p.inventory.stock_quantity if p.inventory else 0,
-                "status": (
-                    "Out of Stock"
-                    if p.inventory.stock_quantity == 0
-                    else "Low Stock" if p.inventory.stock_quantity < 10 else "In Stock"
-                ),
-                "sku": p.sku,
-                "image_url": p.image_url,
-            }
-            for p in products
-        ]
+                {
+                    "id": str(p.id),
+                    "name": p.name,
+                    "description": p.description,
+                    "category": p.category.name if p.category else None,
+                    "category_id": str(p.category_id),
+                    "price": float(p.price),
+                    "stock_quantity": p.inventory.stock_quantity if p.inventory else 0,
+                    "status": (
+                        "Out of Stock"
+                        if not p.inventory or p.inventory.stock_quantity == 0
+                        else "Low Stock" if p.inventory.stock_quantity < 10 else "In Stock"
+                    ),
+                    "sku": p.sku,
+                    "image_url": p.image_url,
+                }
+                for p in products
+            ]
 
         try:
             if redis_client:
