@@ -5,7 +5,7 @@ from sqlalchemy import String, Text, Numeric, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import relationship
-
+from app.modules.catalog.models.category import Category
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
 
