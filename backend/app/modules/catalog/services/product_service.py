@@ -25,7 +25,7 @@ class ProductService:
         product = Product(
             name=payload.name,
             description=payload.description,
-            category=payload.category,
+            category_id=payload.category_id,
             price=payload.price,
             sku=payload.sku,
             image_url=payload.image_url,
@@ -88,7 +88,8 @@ class ProductService:
                 "id": str(p.id),
                 "name": p.name,
                 "description": p.description,
-                "category": p.category,
+                "category": p.category.name if p.category else None,
+                "category_id": str(p.category_id),
                 "price": float(p.price),
                 "stock_quantity": p.inventory.stock_quantity if p.inventory else 0,
                 "status": (
@@ -126,7 +127,8 @@ class ProductService:
             "id": str(product.id),
             "name": product.name,
             "description": product.description,
-            "category": product.category,
+            "category": product.category.name if product.category else None,
+            "category_id": str(product.category_id),
             "price": float(product.price),
             "stock_quantity": stock,
             "status": status,
@@ -145,8 +147,8 @@ class ProductService:
         if payload.description:
             product.description = payload.description
 
-        if payload.category:
-            product.category = payload.category
+        if payload.category_id:
+            product.category_id = payload.category_id
 
         if payload.price:
             product.price = payload.price
