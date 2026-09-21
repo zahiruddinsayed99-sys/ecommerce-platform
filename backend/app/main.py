@@ -31,6 +31,8 @@ app.add_middleware(
         "http://localhost:4200",
         "http://127.0.0.1:4200",
         "http://localhost:8000",
+        "https://ecommerce-platform-app-sable.vercel.app",
+        "https://ecommerce-platform-vk7x.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
