@@ -39,12 +39,7 @@ class ProductRepository:
         query = query.filter(Product.is_active.is_(True))
 
         if category:
-            # Check if filtering by category_id directly or by category name/slug via relationship
-            from app.modules.catalog.models.category import Category
-            if isinstance(category, str) and len(category) == 36:  # UUID string check
                 query = query.filter(Product.category_id == category)
-            else:
-                query = query.join(Product.category).filter(Category.name == category)
 
         if search:
             query = query.filter(Product.name.ilike(f"%{search}%"))
