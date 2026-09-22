@@ -1,6 +1,9 @@
-from redis import Redis
-from app.core.config import settings
+# app/core/cache.py
+from app.core.redis_client import redis_client
 
-redis_client = Redis(
-    host=settings.REDIS_HOST, port=settings.REDIS_PORT, decode_responses=True
-)
+def check_redis():
+    try:
+        return redis_client.ping()
+    except Exception as e:
+        print(f"Redis ping warning: {e}")
+        return False
