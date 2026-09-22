@@ -27,3 +27,13 @@ def get_redis():
     )
 
 redis_client = get_redis()
+
+def check_redis() -> bool:
+    """Healthcheck helper used by app.main for Redis ping."""
+    try:
+        if redis_client:
+            return bool(redis_client.ping())
+        return False
+    except Exception as e:
+        print(f"Redis ping warning: {e}")
+        return False
