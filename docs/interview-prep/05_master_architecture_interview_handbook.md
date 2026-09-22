@@ -1,539 +1,400 @@
-# 05_Enterprise_ECommerce_Code_Architecture_and_Implementation_Templates.md
+# Document 05: Code Architecture & Implementation Templates
 
-# Enterprise E-Commerce Platform: Code Architecture aur Implementation Templates
+**Project:** Enterprise E-Commerce Platform
 
-> **Document Classification:** Code-Level Engineering Templates, Backend Domain Contracts & Angular 19 Reactive Stores
-> 
-> 
-> **Target Audience:** Full-Stack Engineers, Technical Leads & Solution Architects
-> **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy 2.x, PostgreSQL 17, Pydantic v2, Angular 19+ (Standalone + Signals)
-> 
-> 
+**Target Environment:** Local Docker Compose / Render Web Service + Supabase PostgreSQL 17 + Upstash Redis
+
+**Classification:** Deep Implementation Handbook & Production Code Templates
+
+**Language Tone:** Professional Hinglish with Production Code Annotations
 
 ---
 
-## 1. Architectural Philosophy & Layer Contracts
+## 1. Architectural Philosophy & Layer Separation
 
-Enterprise applications mein non-negotiable boundaries hoti hain. Hobby projects ka sabse bada anti-pattern hota hai: request payloads ko direct database sessions mein pass karna ya raw database ORM entities ko JSON responses mein return karna. Is platform mein har layer strict contracts enforce karti hai:
+Enterprise E-Commerce backend ko **Clean Domain-Driven Modular Monolith** pattern par banaya gaya hai. Har domain module (`auth`, `catalog`, `cart`, `orders`, `payments`, `admin`) strict layer separation follow karta hai:
 
 ```
-[ HTTP Ingress / Pydantic v2 Payload ]
-                │
-                ▼
-┌──────────────────────────────────────────────┐
-│             FastAPI Router Layer             │
-│  - Parameter & Body validation (Pydantic)    │
-│  - Auth Context Dependency Injection (JWT)   │
-│  - HTTP Status mapping (201, 200, 204)       │
-└──────────────────────┬───────────────────────┘
-                       │ Passes DTO or Entity ID
-                       ▼
-┌──────────────────────────────────────────────┐
-│             Domain Service Layer             │
-│  - Business logic & totals calculation       │
-│  - Pessimistic locking orchestration         │
-│  - Snapshot capture (Pricing / Titles / SKU) │
-│  - Manages Unit of Work (Commit / Refresh)   │
-└──────────────────────┬───────────────────────┘
-                       │ Executes queries via ORM models
-                       ▼
-┌──────────────────────────────────────────────┐
-│           Repository Access Layer            │
-│  - Direct SQLAlchemy 2.x session queries     │
-│  - Eager joins (`joinedload`)                │
-│  - No business math, pure persistence        │
-└──────────────────────┬───────────────────────┘
-                       │ SQL Statements
-                       ▼
-┌──────────────────────────────────────────────┐
-│            PostgreSQL 17 Database            │
-└──────────────────────────────────────────────┘
+[ HTTP Request / Client (Angular 19 Signals) ]
+                   │
+                   ▼
+┌────────────────────────────────────────────────────────┐
+│ 1. API Controllers & Routing (app/modules/*/routers)   │ ◄── Authentication, RBAC Guard, DTO Parsing
+└──────────────────────────┬─────────────────────────────┘
+                           │ Pydantic v2 DTOs
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│ 2. Application Services (app/modules/*/services)       │ ◄── Business Rules, Locking, Cache Logic
+└─────────────┬────────────────────────────┬─────────────┘
+              │                            │
+              ▼                            ▼
+┌──────────────────────────┐  ┌──────────────────────────┐
+│ 3. Domain Repositories   │  │ 4. Cache & Async Broker  │
+│    (SQLAlchemy 2.0 ORM)  │  │    (Redis 7 / Upstash)   │
+└─────────────┬────────────┘  └──────────────────────────┘
+              │
+              ▼
+┌────────────────────────────────────────────────────────┐
+│ 5. Database Layer (PostgreSQL 17 / Supabase)           │ ◄── Pessimistic Locking & Financial Ledgers
+└────────────────────────────────────────────────────────┘
 
 ```
 
-### The Entity vs. DTO Separation Principle
+### Layer Golden Rules:
 
-Sprint 4.6A mein ek architectural bug fix kiya gaya: service layer ke mutation methods serialized dictionaries receive kar rahe the bajay attached SQLAlchemy models ke, jisse unit-of-work tracking fail ho rahi thi.
-
-Platform do methods ka strict convention enforce karta hai across all domain modules:
-
-1. `get_<entity>()`: Database se data fetch karke Pydantic DTO mein map karta hai aur client API response ke liye serialize karta hai (read-only presentation).
-
-
-2. `get_<entity>_entity()`: Active open database session mein attached SQLAlchemy ORM model return karta hai taaki direct mutations, status updates aur transactional locking ho sake.
-
-
+1. **Routers Kabhi Direct DB Queries Nahi Likhenge:** Router ka kaam sirf request receive karna, dependency inject karna (`get_db`, `get_current_user`), aur Pydantic schema return karna hai.
+2. **DTOs vs Database Models Decoupling:** Database entities (`SQLAlchemy Base`) kabhi direct client ko expose nahi hoti. Har response Pydantic v2 DTO ke through serialize hoti hai taaki schema changes se API break na ho.
+3. **Pessimistic Locking sirf Service Layer me:** Concurrency aur race conditions handle karne ke liye transaction boundaries aur `with_for_update()` service methods me encapsulate rehte hain.
 
 ---
 
-## 2. Backend Implementation Templates (FastAPI / Python 3.12)
+## 2. Production Code Templates (Backend — FastAPI & SQLAlchemy 2.x)
 
-### 2.1 Database Core & Session Configuration (`app/database/session.py`)
+### 2.1 Core Config & Environment Resolution (Pydantic v2 & 12-Factor App)
+
+Production Render aur local Docker environment ko bina code modification handle karne ke liye baseline config:
 
 ```python
-"""
-Database session management with SQLAlchemy 2.x.
-Provides thread-local synchronous session lifecycle generator.
-"""
-from typing import Generator
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+# app/core/config.py
+from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "Enterprise E-Commerce Platform"
+    ENVIRONMENT: str = "production"
+    DEBUG: bool = False
+
+    # Database Settings
+    DATABASE_URL: str
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+
+    # Redis Cache & Broker Settings (Supports local Docker & Upstash TLS)
+    REDIS_URL: Optional[str] = None
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: Optional[str] = None
+    REDIS_SSL: bool = False
+
+    # JWT Security
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore"
+    )
+
+settings = Settings()
+
+```
+
+---
+
+### 2.2 Resilient Multi-Environment Redis Client Setup
+
+Local (`REDIS_HOST=redis`, plain TCP) aur Production (`Upstash`, `rediss://`, TLS/SSL enforced) auto-switch pattern:
+
+```python
+# app/core/redis_client.py
+import os
+import redis
 from app.core.config import settings
 
-# Pool size and max overflow configured for high-concurrency requests
-engine = create_engine(
-    settings.SQLALCHEMY_DATABASE_URI,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    future=True
-)
+def create_redis_client() -> redis.Redis:
+    redis_url = getattr(settings, "REDIS_URL", None) or os.getenv("REDIS_URL")
+    if redis_url:
+        return redis.Redis.from_url(redis_url, decode_responses=True)
 
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-    class_=Session,
-    expire_on_commit=False  # Crucial: Keeps attributes loaded after commit
-)
+    host = getattr(settings, "REDIS_HOST", "localhost")
+    port = int(getattr(settings, "REDIS_PORT", 6379))
+    password = getattr(settings, "REDIS_PASSWORD", None)
 
-Base = declarative_base()
+    # Auto-detect Cloud/Upstash based on host name
+    is_cloud = host not in ("redis", "localhost", "127.0.0.1", "ecommerce-cache")
+    ssl_required = getattr(settings, "REDIS_SSL", is_cloud)
 
-def get_db() -> Generator[Session, None, None]:
-    """Dependency injection helper providing clean session teardown."""
-    db = SessionLocal()
+    return redis.Redis(
+        host=host,
+        port=port,
+        password=password,
+        ssl=ssl_required,
+        ssl_cert_reqs=None if ssl_required else None,
+        decode_responses=True
+    )
+
+redis_client = create_redis_client()
+
+def check_redis() -> bool:
+    """Production health-check probe."""
     try:
-        yield db
-    finally:
-        db.close()
+        if redis_client:
+            return bool(redis_client.ping())
+        return False
+    except Exception as e:
+        print(f"Redis healthcheck ping failed: {e}")
+        return False
 
 ```
 
 ---
 
-### 2.2 SQLAlchemy Domain Models (`app/modules/orders/models/order.py`)
+### 2.3 Concurrency & Pessimistic Row Locking (`SELECT FOR UPDATE`)
 
-Financial audit integrity ke liye Snapshot Pricing columns add kiye gaye hain:
-
-```python
-"""
-Relational mappings for Orders and OrderItems.
-Implements the Snapshot Pricing Strategy for financial audit compliance.
-"""
-import uuid
-from datetime import datetime
-from decimal import Decimal
-from sqlalchemy import Column, String, Numeric, Integer, ForeignKey, DateTime, Enum
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
-from app.database.session import Base
-from app.modules.orders.enums import OrderStatus, PaymentMethod, PaymentStatus, Currency
-
-class Order(Base):
-    __tablename__ = "orders"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    order_number = Column(String(64), unique=True, nullable=False, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    
-    total_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
-    currency = Column(Enum(Currency), default=Currency.INR, nullable=False)
-    
-    status = Column(Enum(OrderStatus), default=OrderStatus.PENDING, nullable=False, index=True)
-    payment_method = Column(Enum(PaymentMethod), default=PaymentMethod.COD, nullable=False)
-    payment_status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
-    payment_reference = Column(String(255), nullable=True)
-    payment_date = Column(DateTime, nullable=True)
-    
-    shipping_address = Column(String(500), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    # Relational associations
-    user = relationship("User", back_populates="orders")
-    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
-
-
-class OrderItem(Base):
-    __tablename__ = "order_items"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False, index=True)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
-
-    # Immutable Snapshot fields (Critical Financial Guard)
-    product_name = Column(String(255), nullable=False)
-    product_sku = Column(String(64), nullable=False)
-    unit_price = Column(Numeric(12, 2), nullable=False)
-    subtotal = Column(Numeric(12, 2), nullable=False)
-    quantity = Column(Integer, nullable=False, default=1)
-
-    order = relationship("Order", back_populates="items")
-    product = relationship("Product")
-
-```
-
----
-
-### 2.3 Repository Layer (`app/modules/orders/repositories/order_repository.py`)
-
-Repository layer pure SQL queries execute karti hai, isme koi business logic ya totals calculation nahi hoti:
+Flash sale ya high-concurrency order placement ke waqt inventory over-selling prevent karne ka production-grade service:
 
 ```python
-"""
-Persistence isolation layer for Orders.
-Contains zero business math; responsible purely for SQL construction and query execution.
-"""
-from typing import List, Optional
-from uuid import UUID
-from sqlalchemy import select, desc
-from sqlalchemy.orm import Session, joinedload
-from app.modules.orders.models.order import Order
-
-class OrderRepository:
-    def __init__(self, db: Session):
-        self.db = db
-
-    def get_by_id(self, order_id: UUID, user_id: Optional[UUID] = None) -> Optional[Order]:
-        """Loads order with items and user eager-loaded. Supports tenant isolation."""
-        stmt = (
-            select(Order)
-            .options(joinedload(Order.items), joinedload(Order.user))
-            .where(Order.id == order_id)
-        )
-        if user_id:
-            stmt = stmt.where(Order.user_id == user_id)
-        return self.db.execute(stmt).scalars().first()
-
-    def list_by_user(self, user_id: UUID, skip: int = 0, limit: int = 50) -> List[Order]:
-        stmt = (
-            select(Order)
-            .options(joinedload(Order.items))
-            .where(Order.user_id == user_id)
-            .order_by(desc(Order.created_at))
-            .offset(skip)
-            .limit(limit)
-        )
-        return list(self.db.execute(stmt).scalars().all())
-
-    def create(self, order: Order) -> Order:
-        self.db.add(order)
-        self.db.flush()  # Flushes IDs without releasing transaction boundary
-        return order
-
-```
-
----
-
-### 2.4 Domain Service Layer with Pessimistic Row Locking (`app/modules/orders/services/order_service.py`)
-
-Checkout ke time `with_for_update()` ke zariye database-level row lock acquire hota hai taaki flash sale mein overselling na ho:
-
-```python
-"""
-Domain business orchestration engine.
-Calculates snapshot totals, allocates inventory with row locks, and controls commits.
-"""
+# app/modules/orders/services/order_service.py
 import uuid
 from decimal import Decimal
 from typing import List
-from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from fastapi import HTTPException, status
-from app.modules.orders.models.order import Order, OrderItem
-from app.modules.orders.schemas.order_schema import OrderCreateSchema
-from app.modules.orders.repositories.order_repository import OrderRepository
+
 from app.modules.catalog.models.product import Product
-from app.modules.catalog.models.inventory import Inventory
-from app.modules.orders.enums import OrderStatus, PaymentStatus, Currency
+from app.modules.orders.models.order import Order, OrderItem
+from app.modules.orders.schemas.order_dto import OrderCreateRequest, OrderResponseDTO
+from app.core.redis_client import redis_client
 
-class OrderService:
-    def __init__(self, db: Session):
-        self.db = db
-        self.order_repo = OrderRepository(db)
-
-    def create_customer_order(self, user_id: uuid.UUID, payload: OrderCreateSchema) -> Order:
+class OrderProcessingService:
+    @staticmethod
+    def create_order_with_pessimistic_lock(
+        db: Session,
+        user_id: uuid.UUID,
+        request: OrderCreateRequest
+    ) -> Order:
         """
-        Transactional Checkout Method:
-        1. Generates human-readable enterprise order number.
-        2. Acquires row lock (SELECT FOR UPDATE) on inventory to prevent overselling.
-        3. Snapshots current catalog prices and names to OrderItem rows.
-        4. Calculates ledger total and commits atomically.
+        Executes order checkout under strict pessimistic row locks (SELECT FOR UPDATE).
+        Prevents race conditions where two users buy the last stock unit simultaneously.
         """
-        order_number = f"ORD-{uuid.uuid4().hex[:8].upper()}"
-        running_total = Decimal("0.00")
-        order_items: List[OrderItem] = []
+        # Step 1: Open atomic transaction
+        with db.begin_nested():
+            total_order_amount = Decimal("0.00")
+            order_items_to_persist = []
 
-        try:
-            for item in payload.items:
-                # 1. Fetch Product Entity
-                product = self.db.execute(
-                    select(Product).where(Product.id == item.product_id)
-                ).scalars().first()
+            for item_req in request.items:
+                # Pessimistic Row-Lock: with_for_update() blocks concurrent transactions
+                stmt = (
+                    select(Product)
+                    .where(Product.id == item_req.product_id)
+                    .with_for_update()
+                )
+                product = db.execute(stmt).scalar_one_or_none()
+
                 if not product:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Product with ID {item.product_id} does not exist"
+                        detail=f"Product {item_req.product_id} not found."
                     )
 
-                # 2. Acquire Pessimistic Row Lock on Inventory
-                inv_stmt = (
-                    select(Inventory)
-                    .where(Inventory.product_id == item.product_id)
-                    .with_for_update()
-                )
-                inventory = self.db.execute(inv_stmt).scalars().first()
-                if not inventory or inventory.stock_quantity < item.quantity:
+                # Inventory check
+                if product.stock_quantity < item_req.quantity:
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Insufficient stock for product: {product.name} (SKU: {product.sku})"
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Insufficient inventory for '{product.title}'. Requested: {item_req.quantity}, Available: {product.stock_quantity}"
                     )
 
-                # 3. Deduct Stock Inventory
-                inventory.stock_quantity -= item.quantity
+                # Deduct inventory atomically
+                product.stock_quantity -= item_req.quantity
 
-                # 4. Calculate Snapshot Subtotal
-                line_subtotal = Decimal(str(product.price)) * Decimal(str(item.quantity))
-                running_total += line_subtotal
+                # Financial Pricing Snapshot: Lock item price at checkout time
+                frozen_unit_price = product.price
+                item_subtotal = frozen_unit_price * item_req.quantity
+                total_order_amount += item_subtotal
 
-                # 5. Build Immutable Order Item Row
                 order_item = OrderItem(
+                    id=uuid.uuid4(),
                     product_id=product.id,
-                    product_name=product.name,
-                    product_sku=product.sku,
-                    unit_price=product.price,
-                    subtotal=line_subtotal,
-                    quantity=item.quantity
+                    product_title_snapshot=product.title,
+                    unit_price_snapshot=frozen_unit_price,
+                    quantity=item_req.quantity,
+                    subtotal=item_subtotal
                 )
-                order_items.append(order_item)
+                order_items_to_persist.append(order_item)
 
-            # 6. Build and Persist Master Order
+            # Persist Master Order
             new_order = Order(
-                order_number=order_number,
+                id=uuid.uuid4(),
                 user_id=user_id,
-                total_amount=running_total,
-                currency=Currency.INR,
-                status=OrderStatus.PENDING,
-                payment_method=payload.payment_method,
-                payment_status=PaymentStatus.PENDING,
-                shipping_address=payload.shipping_address,
-                items=order_items
+                status="PENDING_PAYMENT",
+                total_amount=total_order_amount,
+                items=order_items_to_persist
             )
+            db.add(new_order)
 
-            self.order_repo.create(new_order)
-            self.db.commit()
-            self.db.refresh(new_order)
-            return new_order
+        # Commit master transaction
+        db.commit()
+        db.refresh(new_order)
 
-        except Exception:
-            self.db.rollback()
-            raise
+        # Invalidate Product List Redis Cache after stock depletion
+        try:
+            if redis_client:
+                redis_client.delete("cache:products:list")
+        except Exception as e:
+            print(f"Redis cache invalidation warning: {e}")
+
+        return new_order
 
 ```
 
 ---
 
-### 2.5 API Presentation Router (`app/modules/orders/routers/order_router.py`)
+### 2.4 Defensive Admin Serialization Pattern (Database Mismatch Immunity)
+
+Schema drift aur missing optional columns se endpoint 500 error rokne ke liye safe router mapping:
 
 ```python
-"""
-Thin FastAPI presentation router.
-Enforces request validation schemas and explicit response_model DTO contracts.
-"""
+# app/modules/auth/routers/admin_user_router.py
+import uuid
+from datetime import datetime, timezone
 from typing import List
-from uuid import UUID
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session, joinedload
+
 from app.database.session import get_db
-from app.core.dependencies import get_current_active_user
-from app.modules.users.models.user import User
-from app.modules.orders.schemas.order_schema import OrderCreateSchema, OrderResponseSchema
-from app.modules.orders.services.order_service import OrderService
-from app.modules.orders.repositories.order_repository import OrderRepository
+from app.modules.auth.dependencies import require_admin
+from app.modules.auth.models.user import User
 
-router = APIRouter(prefix="/orders", tags=["Orders"])
+class AdminUserResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    is_active: bool
+    created_at: str
+    role: str
 
-@router.post(
-    "",
-    response_model=OrderResponseSchema,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create customer order"
-)
-def create_order(
-    payload: OrderCreateSchema,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    service = OrderService(db)
-    return service.create_customer_order(user_id=current_user.id, payload=payload)
+    model_config = ConfigDict(from_attributes=True)
 
-@router.get(
-    "",
-    response_model=List[OrderResponseSchema],
-    status_code=status.HTTP_200_OK,
-    summary="Fetch current customer order history"
-)
-def list_my_orders(
-    skip: int = 0,
-    limit: int = 50,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    repo = OrderRepository(db)
-    return repo.list_by_user(user_id=current_user.id, skip=skip, limit=limit)
+def resolve_created_at(user) -> str:
+    raw_val = getattr(user, "created_at", None)
+    if isinstance(raw_val, datetime):
+        return raw_val.isoformat()
+    elif isinstance(raw_val, str):
+        return raw_val
+    return datetime.now(timezone.utc).isoformat()
+
+admin_user_router = APIRouter(prefix="/api/v1/admin/users", tags=["Admin Users"])
+
+@admin_user_router.get("", response_model=List[AdminUserResponse], dependencies=[Depends(require_admin)])
+def list_system_users(db: Session = Depends(get_db)):
+    users = db.query(User).options(joinedload(User.role)).all()
+    return [
+        AdminUserResponse(
+            id=u.id,
+            email=u.email,
+            is_active=getattr(u, "is_active", True),
+            created_at=resolve_created_at(u),
+            role=u.role.name if getattr(u, "role", None) else "customer"
+        )
+        for u in users
+    ]
 
 ```
 
 ---
 
-## 3. Frontend Implementation Templates (Angular 19 Standalone & Signals)
+## 3. Production Code Templates (Frontend — Angular 19 Standalone & Signals)
 
-### 3.1 Reactive Signals State Store (`src/app/core/services/cart.service.ts`)
+### 3.1 Cart Store with Fine-Grained Signals & LocalStorage Sync
 
-Cart store reactive signals par operate karta hai bina kisi NgRx boilerplate ke:
+NgRx boilerplate ke bina high-performance reactive cart management:
 
 ```typescript
-import { Injectable, computed, signal } from '@angular/core';
+// src/app/core/state/cart.store.ts
+import { Injectable, computed, signal, effect } from '@angular/core';
 
 export interface CartItem {
-  id: string;
   productId: string;
-  name: string;
-  sku: string;
+  title: string;
   price: number;
-  imageUrl: string;
   quantity: number;
+  stock: number;
+  imageUrl?: string;
 }
 
 @Injectable({
   providedIn: 'root'
 })
-export class CartService {
-  // Fine-grained Reactive Signals
-  private readonly _cartItems = signal<CartItem[]>([]);
-  
-  // Public Read-Only Projections
-  readonly cartItems = this._cartItems.asReadonly();
-  
-  // Memoized Computed Signal for Cart Total
-  readonly totalAmount = computed(() => {
-    return this._cartItems().reduce(
-      (acc, item) => acc + (item.price * item.quantity), 
-      0
-    );
-  });
+export class CartStore {
+  private readonly STORAGE_KEY = 'ecomm_cart_state';
 
-  // Memoized Computed Signal for Total Item Count
-  readonly totalItemsCount = computed(() => {
-    return this._cartItems().reduce((acc, item) => acc + item.quantity, 0);
-  });
+  // State Signal
+  private readonly _items = signal<CartItem[]>(this.loadInitialCart());
 
-  addItem(product: { id: string; name: string; sku: string; price: number; imageUrl: string }): void {
-    this._cartItems.update(items => {
-      const existing = items.find(i => i.productId === product.id);
+  // Public Readonly Signals
+  readonly items = this._items.asReadonly();
+
+  // Computed Signals (Automated memoized calculations)
+  readonly totalItemCount = computed(() =>
+    this._items().reduce((acc, item) => acc + item.quantity, 0)
+  );
+
+  readonly subtotalAmount = computed(() =>
+    this._items().reduce((acc, item) => acc + item.price * item.quantity, 0)
+  );
+
+  readonly formattedTotal = computed(() =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(
+      this.subtotalAmount()
+    )
+  );
+
+  constructor() {
+    // Persistent Storage Sync Effect
+    effect(() => {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this._items()));
+    });
+  }
+
+  addToCart(product: { id: string; title: string; price: number; stock: number; imageUrl?: string }): void {
+    this._items.update((current) => {
+      const existing = current.find((i) => i.productId === product.id);
       if (existing) {
-        return items.map(i => 
+        if (existing.quantity >= product.stock) {
+          return current; // Block over-allocation on client
+        }
+        return current.map((i) =>
           i.productId === product.id ? { ...i, quantity: i.quantity + 1 } : i
         );
       }
-      return [...items, { ...product, productId: product.id, quantity: 1 }];
+      return [...current, {
+        productId: product.id,
+        title: product.title,
+        price: product.price,
+        quantity: 1,
+        stock: product.stock,
+        imageUrl: product.imageUrl
+      }];
     });
   }
 
   updateQuantity(productId: string, quantity: number): void {
     if (quantity <= 0) {
-      this.removeItem(productId);
+      this.removeFromCart(productId);
       return;
     }
-    this._cartItems.update(items =>
-      items.map(i => i.productId === productId ? { ...i, quantity } : i)
+    this._items.update((current) =>
+      current.map((i) => (i.productId === productId ? { ...i, quantity } : i))
     );
   }
 
-  removeItem(productId: string): void {
-    this._cartItems.update(items => items.filter(i => i.productId !== productId));
+  removeFromCart(productId: string): void {
+    this._items.update((current) => current.filter((i) => i.productId !== productId));
   }
 
   clearCart(): void {
-    this._cartItems.set([]);
+    this._items.set([]);
   }
-}
 
-```
-
----
-
-### 3.2 Reactive Checkout Form Component (`src/app/features/checkout/checkout.component.ts`)
-
-Postal PIN code validation regex aur serialized delivery address contract enforce karta hai:
-
-```typescript
-import { Component, ChangeDetectionStrategy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router } from '@angular/router';
-import { HttpClient } from '@angular/common/http';
-import { CartService } from '../../core/services/cart.service';
-
-@Component({
-  selector: 'app-checkout',
-  standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
-  templateUrl: './checkout.component.html',
-  styleUrls: ['./checkout.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush
-})
-export class CheckoutComponent {
-  private readonly fb = inject(FormBuilder);
-  private readonly http = inject(HttpClient);
-  private readonly router = inject(Router);
-  readonly cartService = inject(CartService);
-
-  readonly isSubmitting = signal<boolean>(false);
-  readonly errorMessage = signal<string | null>(null);
-
-  // Address Reactive Form enforcing mandatory 6-digit postal PIN pattern
-  readonly addressForm = this.fb.group({
-    addressLine1: ['', [Validators.required, Validators.minLength(5)]],
-    addressLine2: [''],
-    city: ['', [Validators.required]],
-    state: ['', [Validators.required]],
-    pinCode: ['', [Validators.required, Validators.pattern(/^[1-9][0-9]{5}$/)]]
-  });
-
-  submitOrder(): void {
-    if (this.addressForm.invalid || this.cartService.cartItems().length === 0) {
-      this.addressForm.markAllAsTouched();
-      return;
+  private loadInitialCart(): CartItem[] {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
     }
-
-    this.isSubmitting.set(true);
-    this.errorMessage.set(null);
-
-    const fv = this.addressForm.getRawValue();
-    // Serialization contract: <addressLine1, addressLine2, city, state> - <pinCode>
-    const serializedAddress = `${fv.addressLine1}${fv.addressLine2 ? ', ' + fv.addressLine2 : ''}, ${fv.city}, ${fv.state} - ${fv.pinCode}`;
-
-    const payload = {
-      shipping_address: serializedAddress,
-      payment_method: 'COD',
-      items: this.cartService.cartItems().map(item => ({
-        product_id: item.productId,
-        quantity: item.quantity
-      }))
-    };
-
-    this.http.post<{ id: string; order_number: string }>('/api/v1/orders', payload).subscribe({
-      next: (order) => {
-        this.cartService.clearCart();
-        this.isSubmitting.set(false);
-        this.router.navigate(['/orders', order.id]);
-      },
-      error: (err) => {
-        this.isSubmitting.set(false);
-        this.errorMessage.set(err.error?.detail || 'Order checkout transaction failed.');
-      }
-    });
   }
 }
 
@@ -541,37 +402,35 @@ export class CheckoutComponent {
 
 ---
 
-### 3.3 Functional Auth Interceptor with Whitelist (`src/app/core/interceptors/auth.interceptor.ts`)
-
-Public endpoints ko whitelist karke unnecessary CORS preflights aur invalid headers rokta hai:
+### 3.2 Global Security & Auth Interceptor (Angular 19 Functional API)
 
 ```typescript
+// src/app/core/interceptors/auth.interceptor.ts
 import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
+import { Router } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
-import { AuthService } from '../services/auth.service';
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
-  const authService = inject(AuthService);
-  const token = authService.getAccessToken();
+  const router = inject(Router);
+  const token = localStorage.getItem('access_token');
 
-  // Whitelist login and registration endpoints to prevent unnecessary preflight rejections
-  const isAuthRequest = req.url.includes('/auth/login') || req.url.includes('/auth/register');
-
-  let clonedRequest = req;
-  if (token && !isAuthRequest) {
-    clonedRequest = req.clone({
+  let authReq = req;
+  if (token) {
+    authReq = req.clone({
       setHeaders: {
         Authorization: `Bearer ${token}`
       }
     });
   }
 
-  return next(clonedRequest).pipe(
+  return next(authReq).pipe(
     catchError((error: HttpErrorResponse) => {
-      if (error.status === 401 && !isAuthRequest) {
-        // Clear local storage and route to login upon session invalidation
-        authService.logout();
+      if (error.status === 401) {
+        localStorage.removeItem('access_token');
+        router.navigate(['/auth/login'], { queryParams: { sessionExpired: 'true' } });
+      } else if (error.status === 403) {
+        console.error('Access forbidden (RBAC restriction):', error.message);
       }
       return throwError(() => error);
     })
@@ -582,19 +441,12 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
 ---
 
-## 4. Key Takeaways Checklist
+## 4. Key Architectural Deliverables Summary
 
-1. **Explicit DTO Mapping:** Routers hamesha Pydantic v2 `response_model` declare karein; raw SQLAlchemy models kabhi API response mein direct return na karein.
-
-
-2. **Snapshot Persistence:** Order banate waqt `unit_price`, `product_name`, aur `product_sku` line item row par copy karke freeze karein taaki catalog price badalne par historical ledgers alter na hon.
-
-
-3. **Pessimistic Row Lock:** Flash sale concurrency mein overselling rokne ke liye `SELECT ... FOR UPDATE` row lock use karein.
-
-
-4. **Fine-Grained Signals:** Cart calculations aur dynamic totals ke liye Angular 19 Signals + `ChangeDetectionStrategy.OnPush` use karein.
-
-
-5. **Interceptor Whitelisting:** Auth endpoints (`/auth/login`, `/auth/register`) ko interceptor mein whitelist karein taaki CORS issues na ahein.
-
+| Capability | Technical Mechanism | Benefit |
+| --- | --- | --- |
+| **Pessimistic Locking** | `SELECT ... FOR UPDATE` via SQLAlchemy `with_for_update()` | Over-selling prevention under high concurrency order volumes. |
+| **Price Snapshotting** | Immutable `unit_price_snapshot` column in `order_items` | Historical order audit integrity even after catalog price modifications. |
+| **Resilient Redis TLS** | Auto-detect host inspection with SSL cert verification fallback | Smooth dev-to-prod pipeline without environment configuration bugs. |
+| **Defensive DTO Mapping** | `getattr(model, field, default)` resolver layer | Zero 500 runtime crashes during rapid database schema evolution. |
+| **Fine-Grained Signals** | Angular 19 `signal()`, `computed()`, and `effect()` | Instant client updates with zero change-detection performance bottlenecks. |
