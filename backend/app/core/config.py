@@ -17,8 +17,14 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "ecommerce_user"
     POSTGRES_PASSWORD: str = "ecommerce_password"
 
+# Option 1: Full URL (Local: "redis://localhost:6379/0" | Prod: "rediss://default:...@optimum-...upstash.io:6379")
+    REDIS_URL: str | None = None
+
+    # Option 2: Fallback individual variables
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str | None = None
+    REDIS_SSL: bool = False
 
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
@@ -69,5 +75,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-
+# Pydantic v2 format (Replaces 'class Config:')
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore"
+    )
 settings = Settings()
