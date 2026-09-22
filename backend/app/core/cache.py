@@ -5,5 +5,5 @@ def check_redis():
     try:
         return redis_client.ping()
     except Exception as e:
-        print(f"Redis ping warning: {e}")
+        print(f" Redis ping warning: {e}")
         return False
