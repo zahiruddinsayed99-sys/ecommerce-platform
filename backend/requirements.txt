@@ -12,8 +12,7 @@ alembic
 
 python-jose[cryptography]
 passlib[bcrypt]==1.7.4
-bcrypt==4.1.3
-
+bcrypt==4.0.1
 pydantic-settings
 email-validator
 razorpay
