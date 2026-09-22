@@ -30,7 +30,7 @@ def get_all_users(db: Session = Depends(get_db)):
         UserResponse(
             id=u.id,
             email=u.email,
-            is_active=u.is_active,
+            is_active=getattr(u, "is_active", True),
             created_at=u.created_at,
             role=u.role.name if u.role else "UNKNOWN"
         )
