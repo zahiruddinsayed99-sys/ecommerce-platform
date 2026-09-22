@@ -75,8 +75,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
-        
+# Pydantic v2 format (Replaces 'class Config:')
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore"
+    )
 settings = Settings()
