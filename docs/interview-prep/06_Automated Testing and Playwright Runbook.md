@@ -1,16 +1,25 @@
-# Document 06: Automated Testing and Playwright Runbook
+# 06_Enterprise_ECommerce_Automated_Testing_and_Playwright_Runbook.md
 
-**Project:** Enterprise E-Commerce Platform (`ecommerce-platform`)
+# Enterprise E-Commerce Platform: Automated Testing aur Playwright E2E Runbook
 
-**Tech Stack:** FastAPI, Pytest, Angular 19, Karma/Jasmine, Playwright E2E, GitHub Actions CI/CD
-
-**Language:** Hinglish (Senior Systems & SDET Orientation)
+> **Document Classification:** Quality Engineering Runbook, SDET Playbook, Automated Quality Gates & CI/CD Pipeline
+> 
+> 
+> **Project Name:** Enterprise E-Commerce Platform (`ecommerce-platform`)
+> 
+> 
+> **Testing Tech Stack:** FastAPI, Pytest (Async/Sync TestClient), Angular 19, Karma/Jasmine, Playwright E2E, GitHub Actions CI/CD
+> 
+> 
+> **Language:** Hinglish (Senior Systems & SDET Orientation)
+> 
+> 
 
 ---
 
-## 1. Enterprise Testing Pyramid & Quality Gates
+## 1. Enterprise Testing Pyramid & Quality Gates Baseline
 
-Is enterprise architecture mein testing strategy ko 4 hierarchical tiers mein strictly divide kiya gaya hai taaki fast feedback loop aur 100% regression defense mile:
+Is enterprise commerce architecture mein quality assurance ko 4 hierarchical tiers mein strictly divide kiya gaya hai taaki fast local feedback loop mile aur production deployments mein 0% regression leak ho:
 
 ```
                      / \
@@ -29,26 +38,26 @@ Is enterprise architecture mein testing strategy ko 4 hierarchical tiers mein st
 
 ### Coverage Thresholds & Quality Gates Baseline
 
-* **Backend Coverage Gate:** 88% overall CI coverage across routers, services, and repositories.
+* **Backend Coverage Gate:** 88% overall CI statement coverage across API routers, domain services, aur repository layers.
 
 
 * **Frontend Coverage Gate:** ~87% statement/line coverage aur ~68% branch coverage via Karma/Jasmine.
 
 
-* **Unit Test Health:** 121+/124 passing unit tests with 0 test isolation leaks.
+* **Unit Test Health:** 121+/124 passing unit tests with 0 test isolation leaks (Zero shared database contamination).
 
 
-* **Build Verification:** Production bundling (`ng build`) with zero compilation errors and budget enforcement.
+* **Build Verification:** Production bundling (`ng build --configuration=production`) with zero compilation errors, no budget breaches, aur strictly optimized tree-shakable chunks.
 
 
 
 ---
 
-## 2. Backend Automated Testing Suite (Pytest & Async/Sync Engine)
+## 2. Backend Automated Testing Suite (Pytest & Transactional Isolation)
 
-Backend testing mein real transaction rollback isolation maintain ki jaati hai. Har test case clean database state par run hota hai bina production data pollute kiye.
+Backend testing mein test pollution (ek test ka create kiya hua product ya user doosre test case ko fail kar dena) ko prevent karne ke liye **Nested Transaction Rollback Isolation** implement kiya gaya hai. Har test case ke baad transaction rollback ho jata hai, jisse database state hamesha pristine rehti hai.
 
-### `backend/tests/conftest.py` (Database Fixtures & TestClient Setup)
+### 2.1 `backend/tests/conftest.py` (Database Fixtures & TestClient Setup)
 
 ```python
 import pytest
@@ -127,7 +136,9 @@ def customer_auth_headers(db_session: Session) -> dict:
 
 ```
 
-### `backend/tests/orders/test_order_service.py` (Concurrency & Out-of-Stock Guard)
+---
+
+### 2.2 `backend/tests/orders/test_order_service.py` (Concurrency & Out-of-Stock Guard)
 
 ```python
 import pytest
@@ -139,7 +150,7 @@ from app.modules.catalog.models.inventory import Inventory
 
 def test_order_creation_insufficient_stock_rollback(db_session):
     """
-    Business Verification:
+    Business Rule Verification:
     Verify that if a customer attempts to purchase quantity > available stock,
     HTTPException(400) is raised, and inventory is NEVER modified.
     """
@@ -161,7 +172,7 @@ def test_order_creation_insufficient_stock_rollback(db_session):
 
     # 2. Act & Assert Out-of-Stock Failure
     with pytest.raises(HTTPException) as exc_info:
-        order_service.create_order(user_id=1, payload=order_payload)
+        order_service.create_customer_order(user_id=1, payload=order_payload)
 
     assert exc_info.value.status_code == 400
     assert "Insufficient stock" in exc_info.value.detail
@@ -177,7 +188,7 @@ def test_order_creation_insufficient_stock_rollback(db_session):
 
 ## 3. Frontend Unit & Integration Testing (Angular 19, Karma, Jasmine)
 
-Angular testing mein Signals ki reactivity aur asynchronous interceptors ko isolated mocks ke sath verify kiya jaata hai.
+Angular testing suite mein component life cycles, dynamic Signals state, aur HTTP interceptor request mutation ko `HttpTestingController` ke sath verify kiya jata hai.
 
 ### `frontend/src/app/core/interceptors/auth.interceptor.spec.ts`
 
@@ -240,28 +251,9 @@ describe('AuthInterceptor Integration', () => {
 
 ## 4. End-to-End Test Automation (Playwright Runbook)
 
-Playwright directly production-like browser instances spawn karta hai aur real DOM state, network calls, aur navigation transitions ko validate karta hai.
+Playwright directly isolated headless browser contexts spawn karta hai (Chromium, Firefox, WebKit), network calls ko trace karta hai, aur reactive form submissions ko end-to-end validate karta hai.
 
-### Directory Structure & Config
-
-```text
-e2e/
-├── playwright.config.ts
-├── package.json
-├── fixtures/
-│   └── auth.fixture.ts
-├── pages/
-│   ├── login.page.ts
-│   ├── catalog.page.ts
-│   └── checkout.page.ts
-└── specs/
-    ├── 01_auth_rbac.spec.ts
-    ├── 02_checkout_flow.spec.ts
-    └── 03_admin_metrics.spec.ts
-
-```
-
-### `e2e/playwright.config.ts`
+### 4.1 Playwright Test Configuration (`e2e/playwright.config.ts`)
 
 ```typescript
 import { defineConfig, devices } from '@playwright/test';
@@ -303,7 +295,11 @@ export default defineConfig({
 
 ```
 
-### `e2e/specs/02_checkout_flow.spec.ts` (Full Customer Journey)
+---
+
+### 4.2 Critical Customer Checkout Spec (`e2e/specs/02_checkout_flow.spec.ts`)
+
+Yeh spec pure user conversion funnel ko verify karta hai: Login $\rightarrow$ Product Catalog $\rightarrow$ Signals Cart $\rightarrow$ Reactive Address Form $\rightarrow$ Order Success Banner.
 
 ```typescript
 import { test, expect } from '@playwright/test';
@@ -334,7 +330,7 @@ test.describe('E-Commerce Core Flow: Catalog to Order Confirmation', () => {
     await expect(page.locator('.cart-item-title')).toContainText(productName);
     await page.click('[data-test="proceed-to-checkout-btn"]');
 
-    // 5. Fill Reactive Shipping Form
+    // 5. Fill Reactive Shipping Form with valid PIN
     await expect(page).toHaveURL('/checkout');
     await page.fill('[data-test="address-line-1"]', 'Flat 402, Royal Palms');
     await page.fill('[data-test="city-input"]', 'Pune');
@@ -361,11 +357,10 @@ test.describe('E-Commerce Core Flow: Catalog to Order Confirmation', () => {
 
 ## 5. CI/CD Pipeline Automation (GitHub Actions)
 
-Production build aur automated tests ko enforce karne ke liye automated GitHub Actions pipeline configure kiya gaya hai.
-
-### `.github/workflows/quality_gate.yml`
+Har pull request par automated quality gates run hote hain jo static analysis, Pytest, Angular unit tests, aur containerized Playwright specs ko verify karte hain:
 
 ```yaml
+# .github/workflows/quality_gate.yml
 name: Production Quality & Test Gates
 
 on:
@@ -459,7 +454,6 @@ jobs:
       - name: Build & Run Local Staging via Docker Compose
         run: |
           docker compose -f docker-compose.yml up -d --build
-          # Wait for healthcheck ping
           docker compose exec -T backend curl --retry 10 --retry-delay 3 http://localhost:8000/api/v1/health
 
       - name: Install Playwright & Browsers
@@ -484,49 +478,59 @@ jobs:
 
 ---
 
-## 6. Enterprise SIT Execution Runbook & Debugging Protocol
+## 6. Execution Commands & Fast Debugging Protocol
 
-Jab test runs fail hote hain ya flaky behavior dikhta hai, engineer ko systematically isolate karna hota hai:
-
-### Step 1: Flaky Test Isolation
-
-1. **Network Race Conditions:** UI par buttons directly click karne ke bajaye hamesha Playwright ke built-in auto-waiting locators use karein:
-```typescript
-// Wrong: Manual fixed wait
-await page.waitForTimeout(2000);
-// Correct: Web-first assertion
-await expect(page.locator('[data-test="cart-count-badge"]')).toHaveText('1');
-
-```
-
-
-2. **Database State Bleed:** Make sure ki `conftest.py` ka fixture `transaction.rollback()` properly execute ho raha ho. Kabhi bhi testing database mein direct commit call na karein fixture level ke bahar.
-
-
-
-### Step 2: Postman / Newman Automated SIT Runner
-
-Agar local headless environment mein API regression suite run karni ho:
+### 6.1 Backend Pytest Execution
 
 ```bash
-# Execute Enterprise Postman Collection through Newman CLI
-newman run postman/Enterprise_Ecommerce_SIT.postman_collection.json \
-  -e postman/staging_environment.json \
-  --reporters cli,htmlextra \
-  --reporter-htmlextra-export reports/sit_report.html \
-  --bail
-
-```
-
-### Step 3: Fast Local Debugging Mode
-
-```bash
-# Run single Playwright spec in UI visual mode with step inspector
-cd e2e
-npx playwright test specs/02_checkout_flow.spec.ts --ui --debug
-
-# Run isolated Pytest test case with stdout logs
+# Full test suite execution with coverage
 cd backend
+pytest -v --cov=app --cov-report=term-missing tests/
+
+# Run single concurrency & stock test with live stdout
 pytest -v -s tests/orders/test_order_service.py::test_order_creation_insufficient_stock_rollback
 
 ```
+
+### 6.2 Frontend & Playwright Execution
+
+```bash
+# Angular headless unit tests
+cd frontend
+npm test -- --watch=false --browsers=ChromeHeadless
+
+# Run Playwright E2E in headless mode
+cd ../e2e
+npx playwright test
+
+# Run Playwright in Interactive Visual UI Inspector mode
+npx playwright test specs/02_checkout_flow.spec.ts --ui --debug
+
+```
+
+### 6.3 Flaky Test Triage Protocol
+
+1. **Network Race Conditions:** UI buttons par blind clicks ya manual `waitForTimeout(2000)` lagane ke bajay hamesha Playwright ke built-in auto-waiting web-first assertions use karein (`await expect(page.locator(...)).toBeVisible()`).
+
+
+2. **Database Bleed:** Agar koi test doosre test ka data dekh raha hai, toh verify karein ki `conftest.py` ka fixture `transaction.rollback()` properly execute ho raha hai aur test file ke andar kahin hard `db_session.commit()` toh call nahi ho raha.
+
+
+
+---
+
+### Complete E-Commerce Portfolio Set Summary
+
+Ab aapke paas **Enterprise E-Commerce Platform** ke bhi sabhi 6 master documents ready ho chuke hain:
+
+1. **`01_Enterprise_ECommerce_Master_Architecture_and_Interview_Handbook.md`** *(System Topology, ADRs, Concurrency, Snapshot Pattern & Verbal Interview Q&A)*
+
+2. **`02_Technical_Vocabulary_and_Core_Competency_Matrix.md`** *(A-Z Lexicon, Entity vs DTO, Signals, CLS & Full Lifecycle Skills Matrix)*
+
+3. **`03_Enterprise_ECommerce_Business_Case_Studies_and_Functional_Specs.md`** *(Snapshot Pricing, Flash Sale Locking, Razorpay Webhook Idempotency & State Machine)*
+
+4. **`04_Enterprise_ECommerce_Production_Manual_QA_Execution_Handbook.md`** *(Happy Path, Negative Scenarios, Production Payloads & Postman SIT Runbook)*
+
+5. **`05_Enterprise_ECommerce_Code_Architecture_and_Implementation_Templates.md`** *(FastAPI Routers, OrderService Row-Locks, Pydantic DTOs & Angular Signals Cart)*
+
+6. **`06_Enterprise_ECommerce_Automated_Testing_and_Playwright_Runbook.md`** *(Pytest Rollback Fixtures, Concurrency Test, Angular Jasmine Specs, Playwright E2E & GitHub Actions CI)*

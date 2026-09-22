@@ -1,495 +1,600 @@
-# Enterprise E-Commerce Platform: Master Architecture & Interview Handbook
+# 05_Enterprise_ECommerce_Code_Architecture_and_Implementation_Templates.md
 
-**Document Version:** 1.0.0
+# Enterprise E-Commerce Platform: Code Architecture aur Implementation Templates
 
-**Target Milestone:** Post-RC1 Production Baseline & Senior Engineering / Solution Architect Interview Mastery
+> **Document Classification:** Code-Level Engineering Templates, Backend Domain Contracts & Angular 19 Reactive Stores
+> 
+> 
+> **Target Audience:** Full-Stack Engineers, Technical Leads & Solution Architects
+> **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy 2.x, PostgreSQL 17, Pydantic v2, Angular 19+ (Standalone + Signals)
+> 
+> 
 
-**Author:** Platform Engineering Team
+---
 
-**Language:** Hinglish (Technical English with conversational Hindi structural explanations)
+## 1. Architectural Philosophy & Layer Contracts
 
-## 1. Executive Summary & Core Platform Overview
-
-### 1.1 Project Mission & Problem Statement
-
-The **Enterprise E-Commerce Platform** is a production-grade, highly resilient, decoupled commerce application built to handle complex customer purchasing lifecycles and administrative enterprise operations. Tutorial e-commerce applications typically implement simple CRUD over coupled databases with fragile frontends. This platform solves realistic distributed enterprise challenges:
-
-* **State Drift & Financial Integrity:** Prevents price tampering, inconsistent inventory tracking, and race conditions during concurrent checkouts.
-
-* **Strict Role-Based Multi-Tenancy (RBAC):** Guarantees zero cross-customer data leakage and complete UI/API isolation between Customer Portal and Admin Management.
-
-* **Enterprise Frontend Reactivity:** Eliminates manual zone/subscription overhead in Angular 19 using fine-grained Signals and `OnPush` change detection.
-
-* **Clean Architecture Monolith:** Avoids premature distributed microservice penalties (network latency, distributed transaction orchestration) while preserving domain isolation via clean layer contracts (Routers -> Services -> Repositories -> Models).
-
-### 1.2 Quantitative Baseline & Release Health
-
-* **Backend Quality Baseline:** 88% overall test coverage across routers, domain services, and repository layers in Python 3.12 / FastAPI.
-
-* **Frontend Quality Baseline:** \~87% line coverage and \~68% branch coverage in Angular 19.
-
-* **API Stability:** 100% passing Enterprise Postman / Newman SIT test suites. Zero broken contracts or unhandled exceptions across 30 seeded catalog products, 8 orders, and 18 order snapshot items.
-
-* **Asset Pipeline Performance:** Static SVG architecture delivers 30 lightweight, vector-rendered product assets (<1.6KB per asset) directly via mounted FastAPI static routers, bypassing expensive third-party blob cold starts for the MVP release candidate.
-
-## 2. End-to-End High-Level Architecture (C4 Model)
-
-### 2.1 C4 Level 1: System Context Diagram
+Enterprise applications mein non-negotiable boundaries hoti hain. Hobby projects ka sabse bada anti-pattern hota hai: request payloads ko direct database sessions mein pass karna ya raw database ORM entities ko JSON responses mein return karna. Is platform mein har layer strict contracts enforce karti hai:
 
 ```
-+-----------------------------------------------------------------------------------------+
-|                                    INTERNET CLIENTS                                     |
-|                                                                                         |
-|       +------------------------------------+   +------------------------------------+   |
-|       |          Customer Browser          |   |          Admin Workstation         |   |
-|       |  (Storefront, Cart, Checkout, PWA) |   |    (Catalog, Metrics, Operations)  |   |
-|       +-----------------+------------------+   +-----------------+------------------+   |
-+-------------------------|----------------------------------------|----------------------+
-                          |                                        |
-                          | HTTPS / REST APIs                      | HTTPS / REST APIs
-                          v                                        v
-+-----------------------------------------------------------------------------------------+
-|                           ENTERPRISE E-COMMERCE PLATFORM BOUNDARY                       |
-|                                                                                         |
-|  +-----------------------------------------------------------------------------------+  |
-|  |                        NGINX / INGRESS REVERSE PROXY LAYER                        |  |
-|  |                   - SSL Termination & Strict Security Headers                     |  |
-|  |                   - Static Asset Caching (/static/product_images)                 |  |
-|  +-----------------------------------------+-----------------------------------------+  |
-|                                            | Forwarded Requests                         |
-|                                            v                                            |
-|  +-----------------------------------------------------------------------------------+  |
-|  |                 ANGULAR 19 SPA (SINGLE PAGE APPLICATION HOST)                     |  |
-|  |   - Standalone Components, Material 3 Design System, Reactive Signal Store         |  |
-|  |   - Functional Guards (authGuard, roleGuard), Dynamic HTTP Interceptors           |  |
-|  +-----------------------------------------+-----------------------------------------+  |
-|                                            | API Calls (/api/v1/*)                      |
-|                                            v                                            |
-|  +-----------------------------------------------------------------------------------+  |
-|  |                FASTAPI CORE SERVICE ENGINE (MODULAR MONOLITH)                     |  |
-|  |  +-------------------+ +--------------------+ +-----------------+ +---------------+  |
-|  |  |   Auth Service    | |   Catalog Service  | |  Orders Service | | Metrics Service|  |
-|  |  |  (JWT/RBAC/OAuth) | |  (Products/Stock)  | |  (Checkout/SIT) | | (Admin Engine) |  |
-|  |  +-------------------+ +--------------------+ +-----------------+ +---------------+  |
-|  |                                         |                                         |  |
-|  |                                         | SQLAlchemy 2.x ORM                      |  |
-|  +-----------------------------------------|-----------------------------------------+  |
-|                                            |                                            |
-|                    +-----------------------+-----------------------+                    |
-|                    v                                               v                    |
-|  +------------------------------------+         +------------------------------------+  |
-|  |     POSTGRESQL 17 PRIMARY RELATIONAL|         |         REDIS 8 IN-MEMORY CACHE    |  |
-|  |     DATABASE                        |         |  - Catalog & Category Cache        |  |
-|  |  - Acid Transactions                |         |  - Fast Key-Value Session Inval    |  |
-|  |  - Enums (OrderStatus, Currency)    |         |  - High Performance Read Offload   |  |
-|  +------------------------------------+         +------------------------------------+  |
-+-----------------------------------------------------------------------------------------+
-                                             |
-                                             | HTTPS Webhooks / API Checkout
-                                             v
-+-----------------------------------------------------------------------------------------+
-|                                EXTERNAL PAYMENT PROVIDER                                |
-|                                                                                         |
-|                            RAZORPAY PAYMENT GATEWAY INFRASTRUCTURE                       |
-|                   - Order Pre-capture, Tokenization, Signatures                         |
-|                   - Asynchronous Webhook State Machine Ingestion                       |
-+-----------------------------------------------------------------------------------------+
-
-```
-
-### 2.2 C4 Level 2: Container Diagram & Internal Modular Interactions
-
-The application executes within an orchestrated multi-container Docker Compose staging environment:
-
-1. **`ecommerce-frontend` Container:** Nginx serves compiled Angular 19 production artifacts. Route splitting ensures administrative chunks are never parsed during storefront initialization.
-
-2. **`ecommerce-backend` Container:** Uvicorn ASGI server executing Python 3.12 with FastAPI. Runs under isolated non-root privileges. Directly controls database connection pools via synchronous SQLAlchemy sessions.
-
-3. **`ecommerce-db` Container:** PostgreSQL 17 configured with transaction isolation, strict Foreign Key constraints, and custom PostgreSQL ENUM types.
-
-4. **`ecommerce-cache` Container:** Redis 8 Alpine instance serving TTL-invalidated catalog data and query buffers.
-
-## 3. Detailed Architectural Layers & Clean Architecture Implementation
-
-```
-               [ HTTP Request ]
-                       │
+[ HTTP Ingress / Pydantic v2 Payload ]
+                │
+                ▼
+┌──────────────────────────────────────────────┐
+│             FastAPI Router Layer             │
+│  - Parameter & Body validation (Pydantic)    │
+│  - Auth Context Dependency Injection (JWT)   │
+│  - HTTP Status mapping (201, 200, 204)       │
+└──────────────────────┬───────────────────────┘
+                       │ Passes DTO or Entity ID
                        ▼
-       ┌───────────────────────────────┐
-       │     FastAPI Router Layer      │  ◄── DTO Input Validation (Pydantic v2)
-       │  (Thin, Status Codes, Auth)   │
-       └───────────────┬───────────────┘
-                       │
+┌──────────────────────────────────────────────┐
+│             Domain Service Layer             │
+│  - Business logic & totals calculation       │
+│  - Pessimistic locking orchestration         │
+│  - Snapshot capture (Pricing / Titles / SKU) │
+│  - Manages Unit of Work (Commit / Refresh)   │
+└──────────────────────┬───────────────────────┘
+                       │ Executes queries via ORM models
                        ▼
-       ┌───────────────────────────────┐
-       │     Domain Service Layer      │  ◄── Business Logic, Totals Calculation,
-       │   (Pure Business Orchestrator)│      Inventory Allocation, Snapshot Pricing
-       └───────────────┬───────────────┘
-                       │
+┌──────────────────────────────────────────────┐
+│           Repository Access Layer            │
+│  - Direct SQLAlchemy 2.x session queries     │
+│  - Eager joins (`joinedload`)                │
+│  - No business math, pure persistence        │
+└──────────────────────┬───────────────────────┘
+                       │ SQL Statements
                        ▼
-       ┌───────────────────────────────┐
-       │      Repository Layer         │  ◄── Persistence Only, Query Building,
-       │ (SQLAlchemy ORM Data Access)  │      Joined Loads, Aggregations
-       └───────────────┬───────────────┘
-                       │
-                       ▼
-       ┌───────────────────────────────┐
-       │   PostgreSQL 17 Database      │  ◄── Tables, Enums, Constraints, Indexes
-       └───────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│            PostgreSQL 17 Database            │
+└──────────────────────────────────────────────┘
 
 ```
 
-### 3.1 The Router Layer (Thin Presentation)
+### The Entity vs. DTO Separation Principle
 
-* **Role:** Pure request ingestion and response serialization. Routers never execute raw SQL, compute currency totals, or modify transactional context.
+Sprint 4.6A mein ek architectural bug fix kiya gaya: service layer ke mutation methods serialized dictionaries receive kar rahe the bajay attached SQLAlchemy models ke, jisse unit-of-work tracking fail ho rahi thi.
 
-* **Contract Enforcement:** Har endpoint strictly `response_model` declare karta hai. Empty `{}` JSON serialization defects are completely eliminated.
+Platform do methods ka strict convention enforce karta hai across all domain modules:
 
-* **Status Code Standard:** POST operations return `HTTP 201 Created`; updates return `HTTP 200 OK`; idempotent updates or deletes return `HTTP 204 No Content` or `200 OK` with detailed DTO payload.
+1. `get_<entity>()`: Database se data fetch karke Pydantic DTO mein map karta hai aur client API response ke liye serialize karta hai (read-only presentation).
 
-### 3.2 The Service Layer (Domain Orchestration Engine)
 
-* **Separation of Concerns:** Business validation, transaction orchestration, total calculations, and price historical snapshots exclusively reside here.
+2. `get_<entity>_entity()`: Active open database session mein attached SQLAlchemy ORM model return karta hai taaki direct mutations, status updates aur transactional locking ho sake.
 
-* **The Core Rule:** *Service methods that mutate state receive and return SQLAlchemy ORM entities, while routers handle Pydantic DTO transformations.* This eliminates the critical defect discovered during Sprint 4.6 SIT where mutation services received plain dictionaries instead of persistent database models.
 
-### 3.3 The Repository Layer (Clean Persistence)
 
-* **Persistence Exclusivity:** Repositories only communicate with `db.session`. They contain zero logic regarding whether an order is eligible for cancellation or how tax is calculated.
+---
 
-* **Standardized Methods:**
+## 2. Backend Implementation Templates (FastAPI / Python 3.12)
 
-  * `get_by_id(id: UUID)`: Fetches an entity by primary key.
+### 2.1 Database Core & Session Configuration (`app/database/session.py`)
 
-  * `list_all(skip: int, limit: int)`: Supports efficient paginated queries.
+```python
+"""
+Database session management with SQLAlchemy 2.x.
+Provides thread-local synchronous session lifecycle generator.
+"""
+from typing import Generator
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from app.core.config import settings
 
-  * `create(entity)` / `update(entity)` / `delete(id)`: Standard persistence lifecycles.
+# Pool size and max overflow configured for high-concurrency requests
+engine = create_engine(
+    settings.SQLALCHEMY_DATABASE_URI,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    future=True
+)
 
-  * Special joined queries: E.g., `joinedload(Order.user)` and `joinedload(Order.items)` to prevent N+1 query disasters.
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+    class_=Session,
+    expire_on_commit=False  # Crucial: Keeps attributes loaded after commit
+)
 
-## 4. Database Schema, Data Models & Alembic Migration Topology
+Base = declarative_base()
 
-```
-                  ┌────────────────────────┐
-                  │         ROLES          │
-                  ├────────────────────────┤
-                  │ id (PK)                │
-                  │ name (VARCHAR)         │
-                  └───────────┬────────────┘
-                              │
-                              │ 1:N
-                              ▼
-┌──────────────────┐    ┌────────────────────────┐
-│    CATEGORIES    │    │         USERS          │
-├──────────────────┤    ├────────────────────────┤
-│ id (PK)          │    │ id (PK)                │
-│ name (VARCHAR)   │    │ role_id (FK)           │
-│ slug (VARCHAR)   │    │ email (UNIQUE)         │
-└────────┬─────────┘    │ hashed_password (STR)  │
-         │              └───────────┬────────────┘
-         │ 1:N                      │
-         ▼                          │ 1:N
-┌──────────────────┐                │
-│     PRODUCTS     │                │
-├──────────────────┤                │
-│ id (PK)          │                │
-│ category_id (FK) │                │
-│ sku (UNIQUE)     │                │
-│ name (VARCHAR)   │                │
-│ price (NUMERIC)  │                │
-│ image_url (TEXT) │                │
-└────────┬─────────┘                │
-         │                          │
-         │ 1:1                      │
-         ▼                          ▼
-┌──────────────────┐    ┌────────────────────────┐
-│    INVENTORY     │    │         ORDERS         │
-├──────────────────┤    ├────────────────────────┤
-│ id (PK)          │    │ id (PK)                │
-│ product_id (FK)  │    │ user_id (FK)           │
-│ stock_quantity   │    │ order_number (UNIQUE)  │
-│ reserved_quantity│    │ status (ENUM)          │
-└──────────────────┘    │ total_amount (NUMERIC) │
-                        │ payment_method (ENUM)  │
-                        │ payment_status (ENUM)  │
-                        │ currency (ENUM)        │
-                        │ shipping_address (TEXT)│
-                        └───────────┬────────────┘
-                                    │
-                                    │ 1:N
-                                    ▼
-                        ┌────────────────────────┐
-                        │      ORDER_ITEMS       │
-                        ├────────────────────────┤
-                        │ id (PK)                │
-                        │ order_id (FK)          │
-                        │ product_id (FK)        │
-                        │ quantity (INT)         │
-                        │ unit_price (NUMERIC)   │◄── Snapshot Price
-                        │ subtotal (NUMERIC)     │◄── Snapshot Subtotal
-                        │ product_name (STR)     │◄── Historical Snapshot
-                        │ product_sku (STR)      │◄── Historical Snapshot
-                        └────────────────────────┘
+def get_db() -> Generator[Session, None, None]:
+    """Dependency injection helper providing clean session teardown."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 ```
 
-### 4.1 Schema Evolution Ledger & Alembic Linearization
+---
 
-During earlier sprints, database revisions experienced a broken tree hash issue (`KeyError: 9b2f4f6c7a81`). The migration graph was linearized into a clean, deterministic revision chain:
+### 2.2 SQLAlchemy Domain Models (`app/modules/orders/models/order.py`)
 
-1. **`400c87388bd6` (Core Authentication):** Baseline schema defining relational tables for `roles` and `users` with initial administrative and customer seeds.
+Financial audit integrity ke liye Snapshot Pricing columns add kiye gaye hain:
 
-2. **`d8a6f0b93c41` (Catalog Master Data Support):** Introduced `categories`, `products`, and `inventory` tables. Safely backfilled legacy null SKU columns using `'LEGACY-' || id`.
+```python
+"""
+Relational mappings for Orders and OrderItems.
+Implements the Snapshot Pricing Strategy for financial audit compliance.
+"""
+import uuid
+from datetime import datetime
+from decimal import Decimal
+from sqlalchemy import Column, String, Numeric, Integer, ForeignKey, DateTime, Enum
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from app.database.session import Base
+from app.modules.orders.enums import OrderStatus, PaymentMethod, PaymentStatus, Currency
 
-3. **`b1c2d3e4f5a6` (Product Extensions):** Added nullable `image_url` string column with static SVG route resolution.
+class Order(Base):
+    __tablename__ = "orders"
 
-4. **`c7d8e9f0a1b2` (Order Pipeline Extension):** Introduced enterprise snapshot fields on `orders` and `order_items`, custom PostgreSQL Enums for `OrderStatus`, `PaymentMethod`, `PaymentStatus`, and `Currency`, and enforced strict shipping address validation with legacy fallbacks.
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    order_number = Column(String(64), unique=True, nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    
+    total_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    currency = Column(Enum(Currency), default=Currency.INR, nullable=False)
+    
+    status = Column(Enum(OrderStatus), default=OrderStatus.PENDING, nullable=False, index=True)
+    payment_method = Column(Enum(PaymentMethod), default=PaymentMethod.COD, nullable=False)
+    payment_status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
+    payment_reference = Column(String(255), nullable=True)
+    payment_date = Column(DateTime, nullable=True)
+    
+    shipping_address = Column(String(500), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-### 4.2 The Snapshot Pricing Strategy (Critical Financial Design)
+    # Relational associations
+    user = relationship("User", back_populates="orders")
+    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
 
-**Architectural Problem:** E-commerce catalogs frequently update product titles, SKUs, and retail prices. If an order references only a foreign key `product_id` and reads live prices from the catalog, modifying a product's price from ₹1,000 to ₹1,500 would corrupt historical orders, alter accounting ledgers, and break customer invoices.
 
-**Enterprise Solution Implemented:**
+class OrderItem(Base):
+    __tablename__ = "order_items"
 
-* Inside `order_items`, the platform explicitly duplicates snapshot fields: `unit_price`, `subtotal`, `product_name`, and `product_sku`.
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
 
-* When an order transitions to `PENDING` or `PROCESSING`, the domain service reads current values from the catalog and permanently snapshots them onto the `OrderItem` row inside the transaction.
+    # Immutable Snapshot fields (Critical Financial Guard)
+    product_name = Column(String(255), nullable=False)
+    product_sku = Column(String(64), nullable=False)
+    unit_price = Column(Numeric(12, 2), nullable=False)
+    subtotal = Column(Numeric(12, 2), nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)
 
-* Even if a merchant deletes a product or alters prices, past financial records remain 100% immutable and audit-compliant.
-
-## 5. Security Architecture, Authentication & RBAC
-
-### 5.1 Dual-Token Lifecycle (Access & Refresh Flow)
+    order = relationship("Order", back_populates="items")
+    product = relationship("Product")
 
 ```
-[ Angular Client ]                      [ FastAPI Backend ]                 [ PostgreSQL / Redis ]
-        │                                        │                                    │
-        ├─── POST /api/v1/auth/login ───────────►│                                    │
-        │    { email, password }                 ├── Verify Hash (bcrypt) ───────────►│
-        │                                        │◄── Hash Valid, Fetch User/Role ────┤
-        │                                        │                                    │
-        │                                        ├── Generate JWT Access Token        │
-        │                                        │   (Short-lived: 15-30 mins)        │
-        │                                        ├── Generate Refresh Token           │
-        │                                        │   (Long-lived: 7-30 days)          │
-        │◄── 200 OK with Tokens ─────────────────┤                                    │
-        │                                        │                                    │
-        │                                        │                                    │
-        ├─── GET /api/v1/orders (with JWT) ─────►│                                    │
-        │    Authorization: Bearer <AccessJWT>   ├── Validate Signature & Expiry      │
-        │                                        ├── Extract User UUID & Role         │
-        │◄── 200 OK (Protected Data) ────────────┤                                    │
-        │                                        │                                    │
-        │                                        │                                    │
-        │    [ Access Token Expires ]            │                                    │
-        │                                        │                                    │
-        ├─── POST /api/v1/auth/refresh ─────────►│                                    │
-        │    { refresh_token }                   ├── Validate Refresh Token           │
-        │                                        ├── Check Redis Revocation Store ───►│
-        │◄── 200 OK with New Access Token ───────┤                                    │
+
+---
+
+### 2.3 Repository Layer (`app/modules/orders/repositories/order_repository.py`)
+
+Repository layer pure SQL queries execute karti hai, isme koi business logic ya totals calculation nahi hoti:
+
+```python
+"""
+Persistence isolation layer for Orders.
+Contains zero business math; responsible purely for SQL construction and query execution.
+"""
+from typing import List, Optional
+from uuid import UUID
+from sqlalchemy import select, desc
+from sqlalchemy.orm import Session, joinedload
+from app.modules.orders.models.order import Order
+
+class OrderRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_by_id(self, order_id: UUID, user_id: Optional[UUID] = None) -> Optional[Order]:
+        """Loads order with items and user eager-loaded. Supports tenant isolation."""
+        stmt = (
+            select(Order)
+            .options(joinedload(Order.items), joinedload(Order.user))
+            .where(Order.id == order_id)
+        )
+        if user_id:
+            stmt = stmt.where(Order.user_id == user_id)
+        return self.db.execute(stmt).scalars().first()
+
+    def list_by_user(self, user_id: UUID, skip: int = 0, limit: int = 50) -> List[Order]:
+        stmt = (
+            select(Order)
+            .options(joinedload(Order.items))
+            .where(Order.user_id == user_id)
+            .order_by(desc(Order.created_at))
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def create(self, order: Order) -> Order:
+        self.db.add(order)
+        self.db.flush()  # Flushes IDs without releasing transaction boundary
+        return order
 
 ```
 
-### 5.2 RBAC Enforcement & Prevention of Cross-Tenant Data Leaks
+---
 
-* **Backend Enforcement:** Protected routes inject security dependencies:
+### 2.4 Domain Service Layer with Pessimistic Row Locking (`app/modules/orders/services/order_service.py`)
 
-  ```
-  CurrentUser = Annotated[User, Depends(get_current_active_user)]
-  AdminUser = Annotated[User, Depends(require_role("Admin"))]
+Checkout ke time `with_for_update()` ke zariye database-level row lock acquire hota hai taaki flash sale mein overselling na ho:
+
+```python
+"""
+Domain business orchestration engine.
+Calculates snapshot totals, allocates inventory with row locks, and controls commits.
+"""
+import uuid
+from decimal import Decimal
+from typing import List
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
+from app.modules.orders.models.order import Order, OrderItem
+from app.modules.orders.schemas.order_schema import OrderCreateSchema
+from app.modules.orders.repositories.order_repository import OrderRepository
+from app.modules.catalog.models.product import Product
+from app.modules.catalog.models.inventory import Inventory
+from app.modules.orders.enums import OrderStatus, PaymentStatus, Currency
+
+class OrderService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.order_repo = OrderRepository(db)
+
+    def create_customer_order(self, user_id: uuid.UUID, payload: OrderCreateSchema) -> Order:
+        """
+        Transactional Checkout Method:
+        1. Generates human-readable enterprise order number.
+        2. Acquires row lock (SELECT FOR UPDATE) on inventory to prevent overselling.
+        3. Snapshots current catalog prices and names to OrderItem rows.
+        4. Calculates ledger total and commits atomically.
+        """
+        order_number = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+        running_total = Decimal("0.00")
+        order_items: List[OrderItem] = []
+
+        try:
+            for item in payload.items:
+                # 1. Fetch Product Entity
+                product = self.db.execute(
+                    select(Product).where(Product.id == item.product_id)
+                ).scalars().first()
+                if not product:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Product with ID {item.product_id} does not exist"
+                    )
+
+                # 2. Acquire Pessimistic Row Lock on Inventory
+                inv_stmt = (
+                    select(Inventory)
+                    .where(Inventory.product_id == item.product_id)
+                    .with_for_update()
+                )
+                inventory = self.db.execute(inv_stmt).scalars().first()
+                if not inventory or inventory.stock_quantity < item.quantity:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Insufficient stock for product: {product.name} (SKU: {product.sku})"
+                    )
+
+                # 3. Deduct Stock Inventory
+                inventory.stock_quantity -= item.quantity
+
+                # 4. Calculate Snapshot Subtotal
+                line_subtotal = Decimal(str(product.price)) * Decimal(str(item.quantity))
+                running_total += line_subtotal
+
+                # 5. Build Immutable Order Item Row
+                order_item = OrderItem(
+                    product_id=product.id,
+                    product_name=product.name,
+                    product_sku=product.sku,
+                    unit_price=product.price,
+                    subtotal=line_subtotal,
+                    quantity=item.quantity
+                )
+                order_items.append(order_item)
+
+            # 6. Build and Persist Master Order
+            new_order = Order(
+                order_number=order_number,
+                user_id=user_id,
+                total_amount=running_total,
+                currency=Currency.INR,
+                status=OrderStatus.PENDING,
+                payment_method=payload.payment_method,
+                payment_status=PaymentStatus.PENDING,
+                shipping_address=payload.shipping_address,
+                items=order_items
+            )
+
+            self.order_repo.create(new_order)
+            self.db.commit()
+            self.db.refresh(new_order)
+            return new_order
+
+        except Exception:
+            self.db.rollback()
+            raise
+
+```
+
+---
+
+### 2.5 API Presentation Router (`app/modules/orders/routers/order_router.py`)
+
+```python
+"""
+Thin FastAPI presentation router.
+Enforces request validation schemas and explicit response_model DTO contracts.
+"""
+from typing import List
+from uuid import UUID
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.orm import Session
+from app.database.session import get_db
+from app.core.dependencies import get_current_active_user
+from app.modules.users.models.user import User
+from app.modules.orders.schemas.order_schema import OrderCreateSchema, OrderResponseSchema
+from app.modules.orders.services.order_service import OrderService
+from app.modules.orders.repositories.order_repository import OrderRepository
+
+router = APIRouter(prefix="/orders", tags=["Orders"])
+
+@router.post(
+    "",
+    response_model=OrderResponseSchema,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create customer order"
+)
+def create_order(
+    payload: OrderCreateSchema,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    service = OrderService(db)
+    return service.create_customer_order(user_id=current_user.id, payload=payload)
+
+@router.get(
+    "",
+    response_model=List[OrderResponseSchema],
+    status_code=status.HTTP_200_OK,
+    summary="Fetch current customer order history"
+)
+def list_my_orders(
+    skip: int = 0,
+    limit: int = 50,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    repo = OrderRepository(db)
+    return repo.list_by_user(user_id=current_user.id, skip=skip, limit=limit)
+
+```
+
+---
+
+## 3. Frontend Implementation Templates (Angular 19 Standalone & Signals)
+
+### 3.1 Reactive Signals State Store (`src/app/core/services/cart.service.ts`)
+
+Cart store reactive signals par operate karta hai bina kisi NgRx boilerplate ke:
+
+```typescript
+import { Injectable, computed, signal } from '@angular/core';
+
+export interface CartItem {
+  id: string;
+  productId: string;
+  name: string;
+  sku: string;
+  price: number;
+  imageUrl: string;
+  quantity: number;
+}
+
+@Injectable({
+  providedIn: 'root'
+})
+export class CartService {
+  // Fine-grained Reactive Signals
+  private readonly _cartItems = signal<CartItem[]>([]);
   
-  ```
+  // Public Read-Only Projections
+  readonly cartItems = this._cartItems.asReadonly();
+  
+  // Memoized Computed Signal for Cart Total
+  readonly totalAmount = computed(() => {
+    return this._cartItems().reduce(
+      (acc, item) => acc + (item.price * item.quantity), 
+      0
+    );
+  });
 
-* **Tenant Isolation Logic:** In customer endpoints (`/api/v1/orders`), the service layer automatically injects the authenticated `user_id` into repository query filters (`where(Order.user_id == current_user.id)`). Customers cannot guess or manipulate an `order_id` to inspect another user's invoice.
+  // Memoized Computed Signal for Total Item Count
+  readonly totalItemsCount = computed(() => {
+    return this._cartItems().reduce((acc, item) => acc + item.quantity, 0);
+  });
 
-* **Frontend Interceptor Safeguard:** Angular's functional `authInterceptor` automatically attaches the active Bearer token to all outgoing `/api/v1/*` HTTP calls while explicitly ignoring public endpoints (`/auth/login`, `/auth/register`) to prevent unnecessary CORS preflight rejections.
+  addItem(product: { id: string; name: string; sku: string; price: number; imageUrl: string }): void {
+    this._cartItems.update(items => {
+      const existing = items.find(i => i.productId === product.id);
+      if (existing) {
+        return items.map(i => 
+          i.productId === product.id ? { ...i, quantity: i.quantity + 1 } : i
+        );
+      }
+      return [...items, { ...product, productId: product.id, quantity: 1 }];
+    });
+  }
 
-## 6. Frontend Architecture (Angular 19 & Signals Paradigm)
+  updateQuantity(productId: string, quantity: number): void {
+    if (quantity <= 0) {
+      this.removeItem(productId);
+      return;
+    }
+    this._cartItems.update(items =>
+      items.map(i => i.productId === productId ? { ...i, quantity } : i)
+    );
+  }
 
-### 6.1 Signals vs. RxJS BehaviorSubjects: Why Signals Win in Enterprise Storefronts
+  removeItem(productId: string): void {
+    this._cartItems.update(items => items.filter(i => i.productId !== productId));
+  }
 
-In traditional Angular architectures, application state relies on RxJS `BehaviorSubject` and `async` pipes. This introduces heavy boilerplate, subscription memory leak risks if unhandled, and coarse-grained change detection where entire component subtrees are re-evaluated.
-
-```
-Classic RxJS Approach:
-[ Event ] ──► [ BehaviorSubject.next() ] ──► [ Zone.js Intercept ] ──► [ Global Dirty Check Tree ]
-
-Angular 19 Signals Approach:
-[ Event ] ──► [ Signal.set() / update() ] ──► [ Fine-Grained Reactive Node Notification ] (OnPush)
-
-```
-
-1. **Granular Reactivity:** Signals provide synchronous, glitch-free dependency tracking. When `cartItems()` signal changes, only the specific DOM nodes reading that signal update.
-
-2. **Simplified Mental Model:** Computed signals (`computed(() => ... )`) automatically re-evaluate only when their exact input dependencies change, eliminating manual `distinctUntilChanged` piping.
-
-3. **Zone.js Independence:** By pairing Signals with `ChangeDetectionStrategy.OnPush`, the platform drastically reduces CPU overhead during continuous DOM interactions.
-
-### 6.2 Frontend Architecture Checklist & Design System Components
-
-* **Layout Primitives:** `PageContainer`, `PageHeader`, `SectionHeader`.
-
-* **Reusable Containers:** `AppCard` (supporting dynamic Light/Dark theme tokens).
-
-* **Feedback & Resilience:** `LoadingSkeleton` (ensuring Zero Cumulative Layout Shift during network fetches), `EmptyState`, and `ErrorState`.
-
-* **Global Actions & Modals:** `ConfirmationDialog` for order cancellations or stock adjustments.
-
-## 7. Operational Runbook, Tooling & Verification Gates
-
-### 7.1 Local Development Boot & Docker Compose Runbook
-
-```
-# 1. Clone repository and verify environment variables
-git clone https://github.com/z4heer/ecommerce-platform.git
-cd ecommerce-platform
-cp .env.example .env
-
-# 2. Spin up multi-container infrastructure
-docker compose down -v
-docker compose build --no-cache
-docker compose up -d
-
-# 3. Apply schema migrations
-docker compose exec backend alembic upgrade head
-
-# 4. Bootstrap master & demo dataset (30 Products, 3 Users, 8 Orders)
-docker compose exec backend python -m scripts.bootstrap
-
-# 5. Verify backend health
-curl -f http://localhost:8000/health
+  clearCart(): void {
+    this._cartItems.set([]);
+  }
+}
 
 ```
 
-### 7.2 Verification Gates & CI Execution
+---
+
+### 3.2 Reactive Checkout Form Component (`src/app/features/checkout/checkout.component.ts`)
+
+Postal PIN code validation regex aur serialized delivery address contract enforce karta hai:
+
+```typescript
+import { Component, ChangeDetectionStrategy, inject, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
+import { CartService } from '../../core/services/cart.service';
+
+@Component({
+  selector: 'app-checkout',
+  standalone: true,
+  imports: [CommonModule, ReactiveFormsModule],
+  templateUrl: './checkout.component.html',
+  styleUrls: ['./checkout.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class CheckoutComponent {
+  private readonly fb = inject(FormBuilder);
+  private readonly http = inject(HttpClient);
+  private readonly router = inject(Router);
+  readonly cartService = inject(CartService);
+
+  readonly isSubmitting = signal<boolean>(false);
+  readonly errorMessage = signal<string | null>(null);
+
+  // Address Reactive Form enforcing mandatory 6-digit postal PIN pattern
+  readonly addressForm = this.fb.group({
+    addressLine1: ['', [Validators.required, Validators.minLength(5)]],
+    addressLine2: [''],
+    city: ['', [Validators.required]],
+    state: ['', [Validators.required]],
+    pinCode: ['', [Validators.required, Validators.pattern(/^[1-9][0-9]{5}$/)]]
+  });
+
+  submitOrder(): void {
+    if (this.addressForm.invalid || this.cartService.cartItems().length === 0) {
+      this.addressForm.markAllAsTouched();
+      return;
+    }
+
+    this.isSubmitting.set(true);
+    this.errorMessage.set(null);
+
+    const fv = this.addressForm.getRawValue();
+    // Serialization contract: <addressLine1, addressLine2, city, state> - <pinCode>
+    const serializedAddress = `${fv.addressLine1}${fv.addressLine2 ? ', ' + fv.addressLine2 : ''}, ${fv.city}, ${fv.state} - ${fv.pinCode}`;
+
+    const payload = {
+      shipping_address: serializedAddress,
+      payment_method: 'COD',
+      items: this.cartService.cartItems().map(item => ({
+        product_id: item.productId,
+        quantity: item.quantity
+      }))
+    };
+
+    this.http.post<{ id: string; order_number: string }>('/api/v1/orders', payload).subscribe({
+      next: (order) => {
+        this.cartService.clearCart();
+        this.isSubmitting.set(false);
+        this.router.navigate(['/orders', order.id]);
+      },
+      error: (err) => {
+        this.isSubmitting.set(false);
+        this.errorMessage.set(err.error?.detail || 'Order checkout transaction failed.');
+      }
+    });
+  }
+}
 
 ```
-# Backend Quality Gate: Linting, Formatting, Typing, Tests
-docker compose exec backend ruff check .
-docker compose exec backend black --check .
-docker compose exec backend mypy app
-docker compose exec backend pytest --cov=app --cov-report=term-missing tests/
 
-# Frontend Quality Gate: Production Build & Jasmine/Karma Test Suite
-cd frontend/ecommerce-frontend
-npm run build -- --configuration production
-npm run test -- --watch=false --browsers=ChromeHeadless
+---
+
+### 3.3 Functional Auth Interceptor with Whitelist (`src/app/core/interceptors/auth.interceptor.ts`)
+
+Public endpoints ko whitelist karke unnecessary CORS preflights aur invalid headers rokta hai:
+
+```typescript
+import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
+import { inject } from '@angular/core';
+import { catchError, throwError } from 'rxjs';
+import { AuthService } from '../services/auth.service';
+
+export const authInterceptor: HttpInterceptorFn = (req, next) => {
+  const authService = inject(AuthService);
+  const token = authService.getAccessToken();
+
+  // Whitelist login and registration endpoints to prevent unnecessary preflight rejections
+  const isAuthRequest = req.url.includes('/auth/login') || req.url.includes('/auth/register');
+
+  let clonedRequest = req;
+  if (token && !isAuthRequest) {
+    clonedRequest = req.clone({
+      setHeaders: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+  }
+
+  return next(clonedRequest).pipe(
+    catchError((error: HttpErrorResponse) => {
+      if (error.status === 401 && !isAuthRequest) {
+        // Clear local storage and route to login upon session invalidation
+        authService.logout();
+      }
+      return throwError(() => error);
+    })
+  );
+};
 
 ```
 
-## 8. Senior & Architect Interview Scenarios (Hinglish Q&A)
+---
 
-### Scenario 1: State Inconsistency & Race Conditions in Concurrent Checkout
+## 4. Key Takeaways Checklist
 
-**Interviewer:** *"Imagine multiple customers checkout the last item in stock simultaneously. How does your backend prevent overselling without crashing database performance?"*
+1. **Explicit DTO Mapping:** Routers hamesha Pydantic v2 `response_model` declare karein; raw SQLAlchemy models kabhi API response mein direct return na karein.
 
-**Your Answer (Hinglish):**
-"Is problem ko solve karne ke liye hum teen primary layers par defensive engineering use karte hain:
 
-1. **Pessimistic Locking / DB Row Locking (`SELECT ... FOR UPDATE`):**
-   Jab checkout transaction trigger hota hai, toh checkout service repository ko bolti hai ki targeted inventory row par pessimistic lock acquire kare:
+2. **Snapshot Persistence:** Order banate waqt `unit_price`, `product_name`, aur `product_sku` line item row par copy karke freeze karein taaki catalog price badalne par historical ledgers alter na hon.
 
-   ```
-   stmt = select(Inventory).where(Inventory.product_id == p_id).with_for_update()
-   inv = db.session.execute(stmt).scalar_one()
-   
-   ```
 
-   Iska fayda ye hai ki jab tak transaction A complete ya rollback nahi hoti, transaction B wait karegi. Negative balance ka chance zero ho jata hai.
+3. **Pessimistic Row Lock:** Flash sale concurrency mein overselling rokne ke liye `SELECT ... FOR UPDATE` row lock use karein.
 
-2. **PostgreSQL Check Constraint:**
-   Application layer se alag, humare PostgreSQL relational schema par explicit database constraint laga hota hai: `CHECK (stock_quantity >= 0)`. Agar application code me koi race condition escape bhi ho jaye, toh database level par transaction instantly `IntegrityError` raise karegi aur roll back ho jayegi.
 
-3. **Redis Distributed Lock (Future High-Scale Alternative):**
-   Very high flash sale concurrency scenarios mein, Postgres DB connections ko lock wait se exhaust hone se bachane ke liye hum Redis lock (`Redlock` algorithm) evaluate karte hain, jahan checkout token issue hone se pehle stock memory level par decrement hota hai."
+4. **Fine-Grained Signals:** Cart calculations aur dynamic totals ke liye Angular 19 Signals + `ChangeDetectionStrategy.OnPush` use karein.
 
-### Scenario 2: Modular Monolith vs. Microservices Trade-off
 
-**Interviewer:** *"Why did you choose a Modular Monolith over Microservices for an enterprise e-commerce platform?"*
+5. **Interceptor Whitelisting:** Auth endpoints (`/auth/login`, `/auth/register`) ko interceptor mein whitelist karein taaki CORS issues na ahein.
 
-**Your Answer (Hinglish):**
-"Ye decision maine **ADR-001** mein document kiya tha. Enterprise development mein premature microservices architectural disaster ban sakti hain.
-
-* **Operational Complexity & Network Overhead:** Agar hum day one par Cart, Orders, Inventory, aur Auth ko alag microservices banate, toh hume distributed transactions handle karni padti (Two-Phase Commit ya Saga Pattern), network latency introduce hoti, aur observability ke liye distributed tracing (OpenTelemetry) manage karna padta.
-
-* **Clean Architecture Monolith as Best of Both Worlds:** Humne Modular Monolith implement kiya jahan har domain (Orders, Products, Auth) completely decoupled module hai jisme strict layer separation hai (Routers, Services, Repositories). Dependency Injection ensure karti hai ki modules ek doosre ke database tables ko directly query na karein.
-
-* **Future Migration Path:** Agar future mein Orders service ka scale 100x ho jata hai, toh Orders router, service, aur repository already isolated hain. Unhe extract karke standalone containerised microservice banana trivial ho jata hai without rewriting core business logic."
-
-### Scenario 3: Dealing with Broken Migration Ledger Trees in Production
-
-**Interviewer:** *"Alembic migrations crash ho gayi with `KeyError` upstream revision hash not found during staging deployment. How do you resolve this without data loss?"*
-
-**Your Answer (Hinglish):**
-"Ye exact real issue humne Sprint 4.6A mein resolve kiya tha jab migration script `d8a6f0b93c41` missing hash `9b2f4f6c7a81` point kar rahi thi.
-
-1. **Root Cause Analysis:** Schema history linearize nahi thi. Branch merges ki wajah se down-revision pointer ek aise commit ko reference kar raha tha jo current production graph mein exist nahi karta tha.
-
-2. **Resolution Strategy:**
-
-   * Maine kabhi bhi production database ko drop ya blind reset nahi kiya.
-
-   * `alembic history` command se actual linear graph identify kiya.
-
-   * Script ke metadata header mein `down_revision` ko update karke foundational authentication hash (`400c87388bd6`) par point karwaya.
-
-   * `alembic upgrade head` test container mein verify kiya, then rollback command `alembic downgrade -1` run karke clean idempotent down-up behavior ensure kiya.
-
-3. **Engineering Standard:** Humne rule set kiya ki schema migration PRs ko merge karne se pehle CI pipeline mein fresh database boot karke full upgrade aur downgrade test pass karna mandatory hai."
-
-### Scenario 4: Historical Financial Integrity via Snapshot Pricing
-
-**Interviewer:** *"If an admin updates a product price from ₹5,000 to ₹3,000, what happens to existing orders, and how does your architecture ensure regulatory accounting compliance?"*
-
-**Your Answer (Hinglish):**
-"Humara architecture **Snapshot Pattern** strictly enforce karta hai:
-
-* `OrderItems` table catalog `products` table par direct live price reference ke liye depend nahi karti.
-
-* Jab order place hota hai, `OrderService` catalog se current price, product title, aur product SKU fetch karti hai aur unhe `OrderItem.unit_price`, `OrderItem.subtotal`, `OrderItem.product_name`, aur `OrderItem.product_sku` columns mein permanently write kar deti hai.
-
-* Iska benefit ye hai ki chahe admin product ka price change kare, SKU update kare, ya product ko catalog se soft-delete kar de, historical orders par zero impact padta hai. Invoices aur financial reporting hamesha mathematically consistent aur audit-compliant rehti hain."
-
-### Scenario 5: Angular 19 Signals & Preventing Memory Leaks
-
-**Interviewer:** *"How did moving to Angular 19 Signals improve performance and reliability over traditional RxJS subscriptions?"*
-
-**Your Answer (Hinglish):**
-"Angular 19 Signals frontend architecture ko simplify aur optimize karte hain:
-
-* **No Manual Subscription Management:** RxJS mein components ko `takeUntilDestroyed` ya manual `.unsubscribe()` use karna padta tha, warna detached views memory leak cause karte the. Signals synchronously read hote hain aur unka cleanup framework automatically handle karta hai.
-
-* **Precise DOM Patching vs Heavy Dirty-Checking:** Zone.js pure component tree ko dirty mark karta tha. Signals ke sath, `ChangeDetectionStrategy.OnPush` use karte hue sirf wahi template node re-render hota hai jiska signal update hua hai (e.g., shopping cart badge total).
-
-* **Computed Safety:** `computed(() => items().reduce(...))` lazily evaluate hota hai aur memoized rehta hai. Jab tak `items()` change nahi hoga, repeated calculations CPU burn nahi karengi."
-
-## 9. Architectural Decision Records (ADR Master Index)
-
-| ADR ID | Decision Title | Status | Primary Rationale & Architectural Trade-off | 
- | ----- | ----- | ----- | ----- | 
-| **ADR-001** | Modular Monolith Architecture | **Approved** | Avoids distributed microservice network overhead & transaction complexity while retaining domain decoupling. | 
-| **ADR-002** | Angular 19 + Standalone Components | **Approved** | Eliminates bloated NgModules; utilizes fast Vite bundling and native tree-shakable standalone imports. | 
-| **ADR-003** | Fine-Grained Signals Reactive Store | **Approved** | Replaces complex RxJS BehaviorSubject boilerplate with predictable, synchronous, zero-leak state management. | 
-| **ADR-004** | PostgreSQL 17 for Relational Core | **Approved** | ACID compliance, strict foreign key constraints, robust JSONB support, and native high-performance ENUM types. | 
-| **ADR-005** | Redis 8 In-Memory Caching | **Approved** | Offloads catalog browsing, search queries, and session lookups from the primary relational database engine. | 
-| **ADR-006** | JWT Access + Refresh Token RBAC | **Approved** | Stateless horizontally scalable authentication pairing short-lived access credentials with long-lived revocable refresh tokens. | 
-| **ADR-007** | Snapshot Pricing Pattern | **Approved** | Duplicates financial data (`unit_price`, `subtotal`, `sku`) onto order items to guarantee immutable accounting integrity. | 
-| **ADR-008** | Lightweight Vector SVG Asset Delivery | **Approved** | Replaces heavy image upload pipelines and cloud CDN expenses during MVP with self-contained, high-contrast, scalable vector assets. | 
-| **ADR-009** | Repository Pattern with Strict Separation | **Approved** | Repositories exclusively execute persistence; service layers orchestrate business logic; routers remain thin DTO mappers. | 
-| **ADR-010** | Linearized Alembic Schema Ledger | **Approved** | Enforces idempotent, bidirectional (`upgrade head` / `downgrade -1`) migration chains, preventing broken tree hash failures. | 
-
-## 10. Glossary & System Metrics Summary
-
-* **ACID:** Atomicity, Consistency, Isolation, Durability. Guaranteed by PostgreSQL 17 relational database transactions.
-
-* **DTO (Data Transfer Object):** Strongly-typed Pydantic v2 schemas validating request inputs and defining exact HTTP JSON serialization contracts.
-
-* **Idempotency:** The property where an operation can be applied multiple times without changing the result beyond the initial application (e.g., payment webhook ingestion).
-
-* **OnPush Change Detection:** Angular optimization mode that skips dirty checking a component unless its `@Input` references change or bound Signals emit updates.
-
-* **Pessimistic Locking:** Database lock acquired at row read time (`SELECT FOR UPDATE`) to prevent concurrent updates until the transaction commits.
-
-* **RBAC (Role-Based Access Control):** Restricting application API endpoints and UI elements based on verified user claims (`Customer` vs. `Admin`).
-
-* **SIT (System Integration Testing):** End-to-end automated testing validating that all decoupled system containers, network layers, and database sessions work in harmony.

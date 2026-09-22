@@ -1,37 +1,50 @@
-# Enterprise E-Commerce Platform: Business Case Studies & Functional Specs
+# 03_Enterprise_ECommerce_Business_Case_Studies_and_Functional_Specs.md
 
-**Document Version:** 1.0.0  
-**Target Audience:** Solution Architects, Product Managers, Senior Full-Stack Engineers, System Analysts  
-**Scope:** Functional Specifications, Business Domain Lifecycles, Edge Cases, Data Contracts & User Journeys  
-**Language:** Hinglish (Technical English paired with structured conversational Hindi explanations)
+# Enterprise E-Commerce Platform: Business Case Studies, Domain Lifecycles aur Functional Specifications
+
+> **Document Classification:** Functional Architecture, Domain Business Workflows & Data Contracts
+> **Target Audience:** Solution Architects, Product Managers, Senior Full-Stack Engineers & Technical Interviewees
+> **Ecosystem:** FastAPI (Python 3.12), PostgreSQL 17, SQLAlchemy 2.x, Redis 7, Celery, Angular 19+ (Signals & Standalone)
 
 ---
 
-## 1. Executive Business Context & Commercial Vision
+## 1. Executive Business Vision & Commercial Context
 
-Traditional e-commerce hobby projects often limit their scope to a shallow CRUD flow: browsing an in-memory list, pushing an ID into an array, and writing a single record to a database. In an enterprise retail environment, this design collapses immediately under real-world operational stress:
+Hobby retail projects aam taur par basic CRUD operations tak simit hote hain: memory se list dikhana, array mein ID push karna, aur single table mein order save karna. Lekin high-volume commercial enterprise systems mein yeh architecture production pressure mein fail ho jati hai:
 
-1. **Catalog Volatility vs. Financial Auditing:** Product prices fluctuate frequently due to promotions, cost variations, and inflation. An order history screen cannot simply reference current catalog pricing without altering historical accounting ledgers.
-2. **Asynchronous Payment Settlement:** Modern checkout does not end synchronously with an HTTP 200 response. Payment gateways (such as Razorpay) rely on asynchronous webhooks, pre-capture authorization, and server-side cryptographic signature verification.
-3. **Data Isolation & Compliance:** Administrative operational tools must never leak metrics, sensitive customer addresses, or cross-tenant transaction histories into customer-facing single-page applications.
-
-This platform bridges the gap between basic retail tutorials and high-volume commercial systems, implementing strict business workflows, verifiable state engines, and production-grade domain isolation.
+1. **Catalog Volatility vs Financial Auditing:** Product prices market inflation, seasonal discounts, aur vendor costs ke hisab se dynamically change hoti rehti hain. Agar order records live catalog join karenge, toh company ke historical accounting ledgers aur customer tax invoices corrupt ho jayenge.
+2. **Asynchronous Payment Settlement & Webhook Flukes:** Modern payment gateways (Razorpay, Stripe) synchronous HTTP responses par depend nahi karte. Network drops, delayed webhooks, aur duplicate webhook retries ko gracefully handle karna mandatory hai.
+3. **High-Concurrency Flash Sales:** 10,000 customers ek limited inventory item (e.g., 5 units) ko ek sath checkout karte hain. Zero overselling (0% negative stock) ensure karna system ki reliability ka sabse bada proof hota hai.
 
 ---
 
 ## 2. Business Case Studies (Real-World Enterprise Scenarios)
 
-### Case Study 1: The Historical Invoice Price Corruption (Snapshot Pricing Domain)
+---
 
-* **Business Scenario:**  
-  On October 1st, a customer purchases the *ForgeStation Desktop Tower* (SKU: `COMP-002`) for ₹1,599.00. On October 15th, the store administrator increases the catalog retail price to ₹1,899.00 due to rising component costs.
-* **The Vulnerability (Naive Implementation):**  
-  In a naive schema, the `order_items` table stores only `order_id`, `product_id`, and `quantity`. When rendering past invoices, the backend joins `order_items` directly with `products`. Consequently, the customer's October 1st invoice retroactively updates to ₹1,899.00, introducing accounting discrepancies and legal non-compliance.
-* **Enterprise Solution Implemented:**  
-  The platform enforces the **Snapshot Pricing Pattern**:
-  * During checkout orchestration in `order_service.py`, current product details are fetched and written directly onto the `order_items` row.
-  * Fields recorded at purchase time: `unit_price`, `subtotal`, `product_name`, and `product_sku`.
-  * Catalog modifications (price, name, or soft deletion) have zero effect on existing order records. Historical ledgers and invoices remain strictly immutable.
+### Case Study 1: Historical Invoice Price Corruption (Financial Snapshot Pricing Pattern)
+
+* **Business Scenario:**
+1 October ko customer *ForgeStation Desktop Tower* (SKU: `COMP-002`) purchase karta hai ₹1,599.00 mein. 15 October ko component costs badhne ke karan store admin catalog retail price ko badha kar ₹1,899.00 kar deta hai.
+* **The Vulnerability (Naive Schema Anti-Pattern):**
+Agar `order_items` table mein sirf `order_id`, `product_id`, aur `quantity` store ho, aur invoices view karte waqt backend `order_items` ko live `products` table se join kare, toh customer ka 1 October ka purana invoice dynamically ₹1,899.00 show karne lagega. Isse:
+1. Accounting audit mismatch hoga.
+2. Legal & tax compliance fail ho jayegi.
+3. Return aur refund disputes escalate honge.
+
+
+* **Enterprise Solution Implemented:**
+Platform ne **Snapshot Pricing Pattern** enforce kiya hai:
+* Checkout ke time `order_service.py` catalog se current metadata nikal kar `order_items` row par permanently freeze kar deta hai.
+* Persisted Snapshot Fields: `unit_price`, `subtotal`, `product_name`, aur `product_sku`.
+* Catalog modifications (price change, title change, ya product deletion) ka existing historical orders par 0% effect padta hai.
+
+
+* **Economic & Business Value:**
+* 100% Tax & Legal audit readiness.
+* Lifetime immutable ledgers bina historical corruption ke.
+
+
 
 ```
 [ Catalog Master Data ]                                 [ Order Creation Event ]
@@ -44,42 +57,63 @@ Product: ForgeStation Tower                             - product_sku:  "COMP-00
 Live Price: ₹1,899.00                                   - unit_price:   1599.00
                                                         - subtotal:     4797.00
                                                         (Remains ₹1,599.00 forever)
+
 ```
 
 ---
 
-### Case Study 2: High-Concurrency Stock Depletion (Flash Sale Safeguard)
+### Case Study 2: Flash Sale High-Concurrency Stock Depletion (Zero Overselling Guard)
 
-* **Business Scenario:**  
-  A limited stock of 5 units of *VoltCharge 65W GaN Charger* (`ELEC-005`) is targeted by 20 customers checking out at the exact same second.
-* **The Vulnerability (Race Condition):**  
-  If the application executes standard `SELECT stock_quantity FROM inventory` followed by `UPDATE inventory SET stock_quantity = stock_quantity - 1`, multiple concurrent threads read identical stock values before writing back updates. This leads to negative inventory (overselling).
-* **Enterprise Solution Implemented:**  
-  A two-tier concurrency control strategy is enforced:
-  1. **Application-Level Row Locking:** `order_service.py` executes a pessimistic query using `with_for_update()`:
-     ```python
-     stmt = select(Inventory).where(Inventory.product_id == p_id).with_for_update()
-     inv = db.session.execute(stmt).scalar_one()
-     ```
-     This locks the specific inventory row until the enclosing transaction commits or rolls back.
-  2. **Database Integrity Constraint:** The underlying PostgreSQL schema defines `CHECK (stock_quantity >= 0)`. If an unexpected race condition escapes the application layer, the database engine aborts the transaction with an `IntegrityError`, preserving data validity.
+* **Business Scenario:**
+Diwali Flash Sale mein *VoltCharge 65W GaN Charger* (`ELEC-005`) ke sirf 5 units stock mein available hain, aur 20 customers exact same second par checkout button click karte hain.
+* **The Vulnerability (TOCTOU Race Condition):**
+Agar application pehle `SELECT stock_quantity FROM inventory` kare aur application-level `if stock >= qty:` ke baad `UPDATE inventory` chalaye, toh multiple concurrent threads same stock value read kar lenge. Result: 5 units hone ke bawajood 12 orders approve ho jayenge aur stock **-7 (Negative Stock)** ho jayega.
+* **Enterprise Solution Implemented:**
+Two-tier concurrency control enforce kiya gaya hai:
+1. **Application-Level Row Locking:** `order_service.py` pessimistic row locking use karta hai (`with_for_update()`):
+```python
+stmt = select(Inventory).where(Inventory.product_id == p_id).with_for_update()
+inv = db.session.execute(stmt).scalar_one()
+
+```
+
+
+Yeh query targeted inventory row par PostgreSQL level ka exclusive lock lagati hai jab tak active transaction commit ya rollback na ho jaye.
+2. **Database Integrity Constraint:** Schema level par safety guard laga hai: `CHECK (stock_quantity >= 0)`. Agar koi unaccounted race condition trigger ho bhi jaye, toh PostgreSQL engine transaction ko `IntegrityError` ke sath abort kar deta hai.
+
+
+* **Economic & Business Value:**
+* 0% negative inventory (Zero overselling guarantee).
+* Cancelled orders aur angry customer refund escalations eliminate ho jate hain.
+
+
 
 ---
 
-### Case Study 3: The Payment Webhook Re-delivery & Signature Verification
+### Case Study 3: Payment Webhook Re-delivery & Double-Spending Defense
 
-* **Business Scenario:**  
-  A customer completes payment on the Razorpay modal. The customer’s browser disconnects before redirecting to the success page, while Razorpay’s webhook infrastructure fires the `order.paid` event twice due to network retries.
-* **The Vulnerability (Double Processing):**  
-  Processing duplicate webhook deliveries can trigger redundant state transitions, duplicate inventory decrements, or corrupt operational metrics.
-* **Enterprise Solution Implemented:**  
-  * **Cryptographic Verification:** Every incoming webhook payload is validated using HMAC-SHA256 against the shared `RAZORPAY_WEBHOOK_SECRET` before the payload is unpacked.
-  * **Idempotent State Transition:** `order_service.py` checks the current state of the order:
-    ```
-    If order.payment_status == PaymentStatus.COMPLETED:
-        return 200 OK (Acknowledge duplicate delivery without re-executing state mutation)
-    ```
-  * Only when the order is in `PENDING` state does it advance to `PROCESSING`, decrement physical inventory, and store `payment_reference` and `payment_date`.
+* **Business Scenario:**
+Customer Razorpay payment modal complete karta hai, lekin redirect hone se pehle customer ka mobile internet drop ho jata hai. Meanwhile, Razorpay ka server webhook event (`order.paid`) bhejta hai, aur network latency ke karan 5 seconds baad same webhook dubara re-fire (retry) hota hai.
+* **The Vulnerability (Double Execution):**
+Agar duplicate webhooks execute ho gaye, toh system do bar order state transition karega, inventory ko do bar deduct kar sakta hai, aur sales KPI metrics double count ho jayenge.
+* **Enterprise Solution Implemented:**
+1. **HMAC-SHA256 Cryptographic Verification:** Webhook aate hi `X-Razorpay-Signature` ko server ke `RAZORPAY_WEBHOOK_SECRET` ke against verify kiya jata hai payload unpack karne se pehle.
+2. **Idempotent State Machine Check:** Service layer check karti hai ki order already transition ho chuka hai ya nahi:
+```python
+if order.payment_status == PaymentStatus.COMPLETED:
+    return {"status": "ignored", "message": "Duplicate event acknowledged without mutation"}
+
+```
+
+
+3. Order sirf tabhi `PROCESSING` mein jata hai aur stock capture karta hai jab wo initial `PENDING` state mein ho. Duplicate deliveries safely ignore ho jati hain.
+
+
+* **Economic & Business Value:**
+* Flawless payment-to-order reconciliation.
+* Zero financial discrepancy gateway aur ledger ke beech.
+
+
 
 ---
 
@@ -103,168 +137,48 @@ Live Price: ₹1,899.00                                   - unit_price:   1599.0
   │ Authenticates   │──────►│ Views Real-Time │──────►│ Updates Orders &│
   │ with Admin Role │       │ Aggregated KPIs │       │ Stock Quantities│
   └─────────────────┘       └─────────────────┘       └─────────────────┘
+
 ```
 
 ### 3.1 Customer Storefront & Catalog Experience
 
-* **Functional Requirement (FR-CAT-01):** The storefront displays 30 seeded catalog items categorized across *Electronics, Computers, Phones, Accessories, Audio, Gaming,* and *Cameras*.
-* **Lightweight Asset Pipeline (FR-CAT-02):** Rather than loading heavy external JPEG/PNG assets that cause layout shift and cold starts, each product renders a dedicated vector SVG asset (<1.6KB) from `/static/product_images/<slug>.svg`.
-* **Zero Cumulative Layout Shift (FR-CAT-03):** When fetching products asynchronously via `/api/v1/products`, the storefront displays structured `LoadingSkeleton` placeholder cards matching target card dimensions (170px image container with responsive typography pills).
-
----
+* **FR-CAT-01 (Seeded Catalog Categories):** Storefront 30 seeded catalog items display karta hai across: *Electronics, Computers, Phones, Accessories, Audio, Gaming,* aur *Cameras*.
+* **FR-CAT-02 (Static Vector SVG Pipeline):** Heavy raster images (JPEG/PNG) ke bajay lightweight dedicated vector SVG assets (<1.6KB) `/static/product_images/<slug>.svg` se serve hote hain, jo cold start latency eliminate karte hain.
+* **FR-CAT-03 (Zero Cumulative Layout Shift):** API fetch ke doran structured `LoadingSkeleton` placeholder cards render hote hain jo target card dimensions (170px container) se exact match karte hain, preventing UI jumping.
 
 ### 3.2 Reactive Cart & Checkout Workflow
 
-* **Reactive State Management (FR-CRT-01):** Cart operations (add, remove, change quantity) update an Angular 19 Signal store without full-page re-renders. Cart totals are evaluated via memoized computed signals:
-  $$\text{Cart Total} = \sum_{i=1}^{n} (\text{unit\_price}_i \times \text{quantity}_i)$$
-* **Structured Shipping Address Serialization (FR-CHK-01):**  
-  The checkout screen collects delivery details via a Reactive Form:
-  * Fields: `addressLine1` (Mandatory), `addressLine2` (Optional), `city` (Mandatory), `state` (Mandatory), `pinCode` (Mandatory, 6 digits).
-  * Payload Serialization Contract:
-    ```
-    "<addressLine1>, <addressLine2>, <city>, <state> - <pinCode>"
-    ```
-  * Example: `"Plot 42, Hitech City, Madhapur, Hyderabad, Telangana - 500081"`
-* **Payment Method Selection (FR-CHK-02):**  
-  Supports `COD` (Cash On Delivery) and `RAZORPAY`. Selecting Razorpay triggers modal checkout token initialization; selecting COD places the order in `PENDING` payment status.
+* **FR-CRT-01 (Signal-Driven Cart Store):** Cart state Angular 19 Signals mein maintain hoti hai. Cart total recalculation memoized `computed()` signals se hota hai:
 
----
+$$\text{Cart Total} = \sum_{i=1}^{n} (\text{unit\_price}_i \times \text{quantity}_i)$$
 
-### 3.3 Administrative Management & Metrics Engine (MVP-002)
 
-* **Dashboard Analytics Aggregation (FR-ADM-01):**  
-  The admin engine exposes an aggregated KPI endpoint (`GET /api/v1/admin/dashboard`) restricted to users with the `Admin` role.
-* **Aggregation Specifications:**
-  * **Total Revenue:** Calculated via `select(func.sum(Order.total_amount)).where(Order.payment_status == PaymentStatus.COMPLETED)`.
-  * **Active Catalog Count:** Evaluated via `select(func.count(Product.id))`.
-  * **Total Orders Count:** Evaluated via `select(func.count(Order.id))`.
-  * **Recent Orders Queue:** Loads the latest 5 orders using `joinedload(Order.user)` to display customer names alongside status chips without N+1 query overhead.
+* **FR-CHK-01 (Structured Address Serialization Contract):** Checkout delivery address form format enforce karta hai:
+* Input Fields: `addressLine1`, `addressLine2`, `city`, `state`, `pinCode` (Strict 6-digit regex `^[1-9][0-9]{5}$`).
+* Serialization Contract:
+```
+"<addressLine1>, <addressLine2>, <city>, <state> - <pinCode>"
 
----
-
-## 4. Complete API Data Contracts (Pydantic V2 DTOs)
-
-### 4.1 Order Creation DTO Specification
-
-```python
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-from uuid import UUID
-from decimal import Decimal
-
-class OrderItemCreateSchema(BaseModel):
-    product_id: UUID = Field(..., description="Target Catalog Product UUID")
-    quantity: int = Field(..., gt=0, le=50, description="Quantity to purchase (1-50)")
-
-class OrderCreateSchema(BaseModel):
-    shipping_address: str = Field(
-        ..., 
-        min_length=10, 
-        max_length=500,
-        description="Serialized shipping address string"
-    )
-    payment_method: str = Field(
-        default="COD", 
-        pattern="^(COD|RAZORPAY)$",
-        description="Supported checkout payment channels"
-    )
-    items: List[OrderItemCreateSchema] = Field(
-        ..., 
-        min_length=1, 
-        description="List of items to order"
-    )
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "shipping_address": "Flat 402, Green Valley, Baner, Pune, Maharashtra - 411045",
-                "payment_method": "COD",
-                "items": [
-                    {
-                        "product_id": "c1f727c9-4a0b-48d6-993d-82d778d9b1a2",
-                        "quantity": 2
-                    }
-                ]
-            }
-        }
-    )
 ```
 
----
 
-### 4.2 Order Response & Snapshot Item DTO Specification
 
-```python
-from datetime import datetime
-from enum import Enum
 
-class OrderStatusEnum(str, Enum):
-    PENDING = "PENDING"
-    PROCESSING = "PROCESSING"
-    SHIPPED = "SHIPPED"
-    DELIVERED = "DELIVERED"
-    CANCELLED = "CANCELLED"
+* **FR-CHK-02 (Dual Payment Routing):** Supports `COD` (Cash On Delivery) aur `RAZORPAY`. Razorpay select karne par token generation trigger hota hai; COD order ko seedha `PENDING` state mein register karta hai.
 
-class OrderItemResponseSchema(BaseModel):
-    id: UUID
-    product_id: UUID
-    product_name: str
-    product_sku: str
-    quantity: int
-    unit_price: Decimal
-    subtotal: Decimal
+### 3.3 Administrative Management & Metrics Engine
 
-    model_config = ConfigDict(from_attributes=True)
+* **FR-ADM-01 (Aggregated Dashboard Analytics):** Admin engine `/api/v1/admin/dashboard` endpoint expose karta hai, strictly restricted to `Admin` role:
+* **Total Revenue:** `select(func.sum(Order.total_amount)).where(Order.payment_status == PaymentStatus.COMPLETED)`.
+* **Active Catalog Count:** `select(func.count(Product.id))`.
+* **Total Orders Count:** `select(func.count(Order.id))`.
+* **Recent Orders Queue:** Eager joined loading (`joinedload(Order.user)`) ke zariye recent 5 orders bina N+1 performance lag ke load hote hain.
 
-class OrderResponseSchema(BaseModel):
-    id: UUID
-    order_number: str
-    user_id: UUID
-    total_amount: Decimal
-    status: OrderStatusEnum
-    payment_method: str
-    payment_status: str
-    currency: str = "INR"
-    shipping_address: str
-    created_at: datetime
-    items: List[OrderItemResponseSchema]
 
-    model_config = ConfigDict(from_attributes=True)
-```
 
 ---
 
-### 4.3 Admin Dashboard Response DTO Specification
-
-```python
-class MetricItem(BaseModel):
-    label: str
-    value: Decimal | int | str
-    change_percentage: float | None = None
-
-class RecentOrderSummary(BaseModel):
-    order_number: str
-    customer_email: str
-    total_amount: Decimal
-    status: str
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-class DashboardResponse(BaseModel):
-    total_revenue: Decimal
-    total_orders: int
-    active_products: int
-    recent_orders: List[RecentOrderSummary]
-
-    model_config = ConfigDict(from_attributes=True)
-```
-
----
-
-## 5. State Machine & Lifecycle Specifications
-
-### 5.1 The Order State Transition Engine
+## 4. State Machine & Order Lifecycle Specifications
 
 ```
                 ┌──────────────────────────────────────────────┐
@@ -286,37 +200,28 @@ class DashboardResponse(BaseModel):
                                                  ┌───────────────┐
                                                  │   DELIVERED   │
                                                  └───────────────┘
+
 ```
 
-#### Valid Transition Matrix
+### Valid State Transitions & Business Rules
 
 | Current State | Target State | Permitted Initiator | Side Effect / Persistence Rule |
-| :--- | :--- | :--- | :--- |
+| --- | --- | --- | --- |
 | **NONE** | `PENDING` | Customer | Order created, Snapshot Pricing locked, Inventory reserved. |
 | **`PENDING`** | `PROCESSING` | System (Webhook) / Admin | Payment marked `COMPLETED`; stock permanently deducted. |
 | **`PENDING`** | `CANCELLED` | Customer / Admin | Reserved inventory restored (`stock_quantity + quantity`). |
-| **`PROCESSING`** | `SHIPPED` | Admin Only | Dispatch tracking code attached; shipping notification queued. |
-| **`SHIPPED`** | `DELIVERED` | Admin / Carrier Sync | Final settlement registered; return window opens. |
-| **`SHIPPED`** | `CANCELLED` | **Disallowed** | Dispatched orders cannot be cancelled via standard endpoint. |
+| **`PROCESSING`** | `SHIPPED` | Admin Only | Dispatch tracking code attached; logistics transit begins. |
+| **`SHIPPED`** | `DELIVERED` | Carrier Sync / Admin | Final settlement registered; return/replacement window opens. |
+| **`SHIPPED`** | `CANCELLED` | **Disallowed** | Dispatched packages cancel nahi ho sakte; RTO (Return to Origin) workflow follow karna hoga. |
 
 ---
 
-## 6. Edge Cases & Defensive Error Handlers
+## 5. Defensive Edge Cases & Error Handlers
 
 | Error Scenario | Root Cause | System Response & Defensive Action |
-| :--- | :--- | :--- |
-| **Empty Checkout Payload** | Client submits `{ items: [] }` | FastAPI Pydantic validator aborts with `HTTP 422 Unprocessable Entity` before hitting database services. |
-| **Ghost Stock Checkout** | Requested quantity exceeds available inventory | Service raises `InsufficientStockException`; transaction rolls back; returns `HTTP 400 Bad Request` with product SKU details. |
-| **Direct Object Reference (IDOR)** | Customer A attempts `GET /api/v1/orders/{order_B_id}` | Repository query enforces `WHERE id == :order_id AND user_id == :current_user_id`. Returns `HTTP 404 Not Found` to prevent metadata leakage. |
-| **Catalog Price Mod during Checkout** | Admin changes price while customer is on payment gateway | Transaction uses pricing captured during initial order creation (`PENDING` state). Customer is charged the exact captured amount. |
-| **Webhook Delivery Latency** | Razorpay webhook arrives 30 seconds after customer closes browser | Webhook handler uses standalone DB session to mark payment `COMPLETED` and update status to `PROCESSING` asynchronously. |
-
----
-
-## 7. Business Acceptance & Verification Matrix
-
-* [x] **Snapshot Integrity:** Verified that updating product table prices does not alter existing line items in `order_items`.
-* [x] **Currency Standard:** All customer interfaces strictly format monetary amounts using the Indian Rupee symbol (`₹` / `INR`) with two decimal places.
-* [x] **Address Validation:** Enforced combined address serialization string with a mandatory 6-digit postal PIN code format.
-* [x] **Multi-Tenancy Guard:** Verified that Customer tokens cannot read administrative KPI routes (`/api/v1/admin/*`), returning `HTTP 403 Forbidden`.
-* [x] **Static Asset Resolution:** Confirmed that all 30 product cards render valid static SVG assets without broken image placeholders.
+| --- | --- | --- |
+| **Empty Checkout Payload** | Client submits `{ items: [] }` | FastAPI Pydantic v2 validator aborts with `HTTP 422 Unprocessable Entity` before touching database. |
+| **Ghost Stock Checkout** | Requested quantity exceeds remaining stock | Service raises `InsufficientStockException`; transaction rollback hota hai; returns `HTTP 400 Bad Request`. |
+| **IDOR Cross-Customer Attack** | Customer A accesses `GET /api/v1/orders/{order_B_id}` | Repository query enforces `WHERE id = :order_id AND user_id = :current_user_id`. Returns `HTTP 404 Not Found`. |
+| **Price Tampering in Mid-Flight** | Admin changes price while user is on payment modal | Transaction `PENDING` state ke snapshot pricing par locked rehti hai; customer ko captured amount hi charge hota hai. |
+| **Delayed Webhook Arrival** | Webhook reaches 60 seconds after user closes browser | Standalone background session payment ko `COMPLETED` mark karke status `PROCESSING` mein sync kar deti hai. |

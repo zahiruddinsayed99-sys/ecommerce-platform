@@ -1,123 +1,431 @@
-# Enterprise E-Commerce Platform: Technical Vocabulary & Core Competency Matrix
+# 04_Enterprise_ECommerce_Production_Manual_QA_Execution_Handbook.md
 
-**Document Version:** 1.0.0  
-**Target Audience:** Senior Full-Stack Developers, Technical Leads, Solution Architects & Engineering Hiring Panels  
-**Scope:** Technical Vocabulary, Linguistic Articulation, Engineering Deep-Dives, and Core Competency Matrix  
-**Language:** Hinglish (Technical English with structural conversational Hindi explanations)
+# Enterprise E-Commerce Platform: Production Manual QA Execution Handbook
 
----
-
-## 1. Domain & Architecture Lexicon (Glossary of Truth)
-
-Har enterprise project mein specific engineering terminology hoti hai jisko interview mein sahi context ke sath articulate karna candidate ko tutorial-level developers se alag karta hai.
-
-### 1.1 Backend, Data & Persistence Terminology
-
-* **Modular Monolith (मॉड्यूलर मोनोलिथ):**
-  * *Formal Definition:* An architectural style where a single deployable unit is strictly segregated into independent domain modules (Auth, Catalog, Orders, Admin) with well-defined boundaries and dependency inversion, avoiding microservice network overhead.
-  * *Platform Context:* FastAPI backend jisme har feature module (`app/modules/orders`, `app/modules/catalog`) apne private routers, services, aur models maintain karta hai.
-
-* **Repository Pattern (रिपॉजिटरी पैटर्न):**
-  * *Formal Definition:* An abstraction layer between the domain business logic and the database data access layer, decoupling SQL persistence mechanisms from enterprise domain rules.
-  * *Platform Context:* `order_repository.py` sirf SQLAlchemy session queries (`select`, `add`, `commit`, `joinedload`) execute karta hai; calculation ya business validation kabhi repository mein nahi hota.
-
-* **Service Layer Pattern (सर्विस लेयर पैटर्न):**
-  * *Formal Definition:* The orchestrator of business logic, boundary transactions, and enterprise rules sitting strictly between presentation controllers (Routers) and data mappers (Repositories).
-  * *Platform Context:* `order_service.py` checkout validation, SKU price resolution, and multi-item subtotal calculations orchestrate karta hai.
-
-* **Pessimistic Locking (`SELECT FOR UPDATE`):**
-  * *Formal Definition:* A concurrency control mechanism where a database row is exclusively locked at read time until the current transactional boundary commits or rolls back, preventing dirty reads and write skew.
-  * *Platform Context:* Concurrent checkouts ke dauran `Inventory` record par lock lagakar overselling prevent karna.
-
-* **Snapshot Pricing Pattern (फाइनेंशियल स्नैपशॉट पैटर्न):**
-  * *Formal Definition:* An immutable point-in-time capture of transactional financial data (unit price, tax rate, SKU, line subtotal) written permanently to the transaction record to prevent retroactive historical corruption when catalog master data changes.
-  * *Platform Context:* `order_items` table mein `unit_price`, `subtotal`, aur `product_name` permanently save hote hain jab order banaya jata hai.
-
-* **Alembic Ledger Linearization (माइग्रेशन लेजर लीनियराइजेशन):**
-  * *Formal Definition:* Structuring database migration revisions into a strictly sequential, single-parent Directed Acyclic Graph (DAG) to ensure idempotent `upgrade head` and `downgrade -1` executions across distributed environments.
-  * *Platform Context:* Sprint 4.6A mein missing revision hash (`9b2f4f6c7a81`) ko linearize karke foundational hash `400c87388bd6` par merge kiya gaya.
-
-* **DTO (Data Transfer Object) Contract:**
-  * *Formal Definition:* Strongly typed serialization objects that enforce the exact shape of incoming request payloads and outgoing API responses, strictly separated from internal ORM entities.
-  * *Platform Context:* Pydantic v2 schemas (`ProductResponse`, `OrderCreateSchema`, `DashboardMetricsDTO`).
-
-* **Entity vs. DTO Separation (एंटीटी बनाम डीटीओ पृथक्करण):**
-  * *Formal Definition:* The architectural discipline of ensuring services handle stateful SQLAlchemy ORM entities internally while boundary routers handle stateless Pydantic DTOs.
-  * *Platform Context:* `get_product_entity()` returns SQLAlchemy ORM instance for mutations, whereas `get_product()` returns serialized DTO for client delivery.
-
-* **Stateless RBAC (Role-Based Access Control):**
-  * *Formal Definition:* Enforcing authorization scopes based on cryptographically signed claims embedded directly within an authenticated user's JWT access token without requiring persistent session lookups per request.
-  * *Platform Context:* FastAPI `Depends(require_role("Admin"))` verifying claims against system roles (`Customer`, `Admin`).
+> **Document Classification:** Quality Engineering Runbook, Production-Grade SIT, Happy Path & Negative Scenarios
+> 
+> 
+> **Target Audience:** Senior QA Engineers, Lead SDETs, Full-Stack Developers, Release Managers
+> 
+> 
+> **Environment Context:** Staging / Pre-Production Docker Compose (`http://localhost:8000/api/v1`)
+> 
+> 
 
 ---
 
-### 1.2 Frontend & Reactive Architecture Terminology
+## 1. Global Setup, Headers & Security Prerequisites
 
-* **Angular 19 Signals (फाइन-ग्रेंड सिग्नल्स):**
-  * *Formal Definition:* Reactive primitives providing fine-grained, synchronous dependency tracking and node-level DOM patching without relying on global Zone.js dirty-checking cycles.
-  * *Platform Context:* Cart total calculation (`computed(() => items().reduce(...))`) aur active checkout state.
+Sabhi HTTP requests mein security tokens aur standard DTO contracts hona mandatory hai. Invalid headers seedha FastAPI middleware aur Pydantic validators dwara block ho jayenge.
 
-* **ChangeDetectionStrategy.OnPush:**
-  * *Formal Definition:* An Angular optimization policy that tells the compiler to check a component template only when its input references change, an event originates within it, or a bound Signal emits an update.
-  * *Platform Context:* Entire component catalog (`AppCard`, `LoadingSkeleton`, `ProductListComponent`) runs on `OnPush` for zero-overhead rendering.
+* **Base URL:** `http://localhost:8000/api/v1`
 
-* **Standalone Components:**
-  * *Formal Definition:* Self-contained Angular structural units that declare their own component, directive, and pipe dependencies directly without the boilerplate of `NgModule`.
-  * *Platform Context:* Full storefront and admin UI built exclusively on Standalone Components with Vite-based lazy chunking.
+* **Standard Test Headers:**
+* `Authorization`: `Bearer <jwt_access_token>` (15-min RS256 token)
 
-* **Cumulative Layout Shift (CLS) Mitigation:**
-  * *Formal Definition:* Minimizing visual instability caused by asynchronous network loading by reserving exact layout boundaries using placeholders.
-  * *Platform Context:* `LoadingSkeleton` component with defined aspect ratios used during catalog and dashboard data fetching.
 
-* **Functional Guards & Interceptors:**
-  * *Formal Definition:* Modern, tree-shakable functional abstractions (`authGuard`, `authInterceptor`) that inspect and transform routing navigation and outgoing HTTP pipelines without class-based boilerplate.
-  * *Platform Context:* `authInterceptor` attaches Bearer tokens dynamically while whitelisting `/auth/login` and `/auth/register` to avoid CORS preflight overhead.
+* `Content-Type`: `application/json`
 
----
 
-## 2. Core Competency Matrix & Interview Mastery
 
-Yeh matrix highlight karta hai ki ek Senior Engineer / Solution Architect ko har skill level par kya deliver karna hota hai aur humare platform ne isko kaise satisfy kiya hai.
+* **Pre-Flight Environment Health Check:**
+```bash
+curl -i -X GET http://localhost:8000/health
+# Expected: HTTP/1.1 200 OK {"status":"healthy","database":"connected","redis":"connected"}
 
-| Core Competency Area | Junior / Mid-Level Expectation | Senior Engineer Demonstration | Platform Realization & Source Proof |
-| :--- | :--- | :--- | :--- |
-| **API Contract & DTO Engineering** | Endpoints return raw dictionaries or ORM entities directly. | Explicit `response_model`, strict HTTP status codes (201 vs 200 vs 204), ORM session refresh after commit. | Fixed `{}` serialization defect in Sprint 4.6A; implemented dual method convention (`get_product_entity` vs `get_product`). |
-| **Database & Concurrency Design** | Basic SQL table definitions with basic autoincrement primary keys. | Relational integrity, custom PostgreSQL ENUMs, historical snapshot columns, pessimistic row locks, and idempotent Alembic linear trees. | PostgreSQL 17 schemas with `OrderStatus`, `PaymentMethod`, `Currency` enums; snapshot pricing in `order_items`; repaired revision hash graphs. |
-| **Frontend State & Performance** | Generic RxJS subscriptions with potential memory leaks and default change detection. | Fine-grained Angular Signals, pure computed projections, `OnPush` strategy, lazy code splitting, and enterprise design system primitives. | Angular 19 standalone architecture, `AppCard`, `LoadingSkeleton`, signal-driven shopping cart with dynamic INR (`₹`) formatting. |
-| **Authentication & Authorization** | Simple cookie or single hardcoded JWT with client-only route protection. | Dual-token lifecycle (short-lived access + revocable refresh), stateless RBAC dependency injection, and zero-leak query tenancy filters. | Decoupled Customer Portal and Admin Dashboard; FastAPI `require_role("Admin")`; functional `authGuard` and `authInterceptor`. |
-| **System Integration Testing (SIT)** | Manual UI testing or isolated unit mocks only. | Containerized automated regression test suites, variable chaining, dynamic auth propagation, and comprehensive assertions. | Enterprise Postman/Newman test collections chaining `baseUrl`, `accessToken`, `productId`, `orderId`; 100% passing contract tests. |
-| **DevOps & Infrastructure Resilience** | "Works on my machine" manual python run. | Multi-container Docker Compose staging topology, non-root user execution, offline wheel cache builds, and dynamic host resolution. | Dockerfile offline wheel installer (`--find-links=./wheels`) achieving 14s build; `socket.gethostbyname` fallback in `config.py`. |
+```
+
+
 
 ---
 
-## 3. High-Impact Technical Vocabulary & Framing (Interview Speaking Scripts)
-
-Jab interviewer specific technical sawal pooche, toh unhe concise, confident, aur standard enterprise English-Hinglish mein answer kaise deliver karna hai:
-
-### 3.1 Topic: "How do you handle API consistency and prevent data leaks?"
-
-* **The Senior Pitch:**
-  > "Hamare architecture mein Router Layer aur Service Layer ke beech strict separation of concerns enforce ki gayi hai. Routers thin hote hain aur exclusively Pydantic V2 DTOs ko consume aur serialize karte hain with explicit `response_model` declarations. Yeh ensure karta hai ki password hashes ya internal database primary keys leak na hon. Furthermore, multi-tenant isolation ke liye customer endpoints authenticated token se extracted `user_id` ko repository level par query filter mein inject karte hain, eliminating direct object reference vulnerabilities (IDOR)."
-
-### 3.2 Topic: "Why did you implement Snapshot Pricing in Orders?"
-
-* **The Senior Pitch:**
-  > "E-commerce systems mein master catalog prices highly dynamic hote hain due to inflation, discounts, ya merchant edits. Agar hum `OrderItems` ko sirf `product_id` ke foreign key se live price query karne denge, toh historical financial reports alter ho jayengi. To guarantee strict financial and regulatory accounting integrity, humne Snapshot Pricing Pattern implement kiya: order creation ke waqt catalog se `unit_price`, `subtotal`, `product_name`, aur `product_sku` copy karke `order_items` record par permanently immutable snapshot bana diya jata hai."
-
-### 3.3 Topic: "Why migrate to Angular 19 Signals instead of traditional RxJS?"
-
-* **The Senior Pitch:**
-  > "Traditional Angular applications mein `BehaviorSubject` aur RxJS pipelines manage karte waqt manual subscription leakages (`unsubscribe`, `takeUntilDestroyed`) aur Zone.js dirty-checking cycle ka significant overhead hota tha. Angular 19 Signals ke sath hum fine-grained reactivity achieve karte hain. Reactive signals synchronous aur glitch-free updates trigger karte hain, jisse `ChangeDetectionStrategy.OnPush` ke sath combine karke sirf specific DOM nodes re-render hote hain, giving us predictable, high-performance UI rendering."
+## 2. Core Functional Modules: Manual QA Execution Runs
 
 ---
 
-## 4. Architectural Defense Checklist (Quick Review Before Any Interview)
+### Module 1: Catalog & Static Vector Asset Engine (CAT)
 
-- [ ] **Can you explain the difference between `get_product()` and `get_product_entity()`?**  
-  *Answer:* `get_product_entity()` returns an attached SQLAlchemy model for mutating transactions inside services. `get_product()` returns a detached Pydantic schema for presentation routers.
-- [ ] **How does Alembic linear history prevent production deployment failures?**  
-  *Answer:* It guarantees that every revision points to an exact, verifiable `down_revision` parent hash, avoiding branching merge conflicts and unknown revision errors during Dockerized automated deployments.
-- [ ] **How is Zero Layout Shift handled in the Angular storefront?**  
-  *Answer:* Through custom `LoadingSkeleton` design components that match the dimensions of the final loaded cards, preventing CLS penalties and visual jarring.
-- [ ] **What is the fail-safe for inventory overselling?**  
-  *Answer:* Application-level pessimistic locking (`SELECT FOR UPDATE`) combined with database-level check constraints (`CHECK (stock_quantity >= 0)`).
+#### 1. Happy Path Scenario
+
+* **Goal:** Storefront par seeded 30 products ka render hona, static SVG vector assets ka bina cold start ke load hona, aur category filtering ka sahi tareeke se work karna.
+
+
+* **Step 1: Fetch Full Catalog with Zero Layout Shift (CLS)**
+* **Method / Endpoint:** `GET /api/v1/products?category=Gaming`
+
+* **Headers:** Public (No token required)
+
+
+* **Expected Response (HTTP 200 OK):**
+* Array of products returned with `id`, `name`, `sku`, `price`, and `category`.
+
+
+* Loading skeletons render hote hain jo exact 170px target card size match karte hain (0 Cumulative Layout Shift).
+
+
+
+
+
+
+* **Step 2: Vector SVG Asset Resolution**
+* **Method / Endpoint:** `GET /static/product_images/voltwave-wireless-headphones.svg`
+
+* **Expected Response (HTTP 200 OK):**
+* Headers contain `Content-Type: image/svg+xml`.
+
+
+* File size is lightweight (<1.6KB), crisp vector graphic renders on high-DPI screens without pixelation.
+
+
+
+
+
+
+
+#### 2. Exception Scenarios
+
+* **Exception Scenario A: Malformed Pagination Query Injection**
+* **Action:** `GET /api/v1/products?skip=-10&limit=99999` call karein.
+
+
+* **Expected Response (HTTP 422 Unprocessable Entity):**
+* Pydantic validation error returns specifying `skip must be >= 0` and `limit must be <= 100`.
+
+
+
+
+
+
+* **Exception Scenario B: Non-Existent Product Lookup**
+* **Action:** `GET /api/v1/products/00000000-0000-0000-0000-000000000000`
+
+* **Expected Response (HTTP 404 Not Found):**
+* Returns `{"detail": "Product not found"}`.
+
+
+
+
+
+
+
+#### 3. Business Value Achievement
+
+* High-conversion customer storefront jo instant search filtering provide karta hai aur zero image layout shift se user bounce rate 40% kam karta hai.
+
+
+
+---
+
+### Module 2: Reactive Cart & Signals Pricing Suite (CRT)
+
+#### 1. Happy Path Scenario
+
+* **Goal:** User dwara multi-item products cart mein add karna, Angular 19 Signals dwara dynamic total calculate hona, aur INR (`₹`) currency pipe format hona.
+
+
+* **Step 1: Add Item to Signal Store**
+* **UI Action:** User clicks "Add to Cart" on *VoltCharge 65W GaN Charger* (`ELEC-005`, ₹34.99).
+
+
+* **Observed Output:**
+* Top navbar cart badge microsecond update hokar `1` ho jata hai.
+
+
+* Memoized computed signal `totalAmount()` renders ₹34.99 bina kisi full-page zone dirty-checking ke.
+
+
+
+
+
+
+* **Step 2: Modify Quantity in Slide-Over Drawer**
+* **UI Action:** Increment quantity to 3.
+
+
+* **Observed Output:** Line item subtotal aur grand total dynamically ₹104.97 ho jata hai.
+
+
+
+
+
+#### 2. Exception Scenarios
+
+* **Exception Scenario A: Stock Ceiling Boundary Breach**
+* **Action:** User drawer mein quantity ko 999 tak increment karne ka try kare.
+
+
+* **Expected Behavior:** UI action button disable ho jata hai ya toast notification prompt karta hai: *"Maximum available stock limit reached for ELEC-005"*.
+
+
+
+
+* **Exception Scenario B: Cart Empty State Transition**
+* **Action:** Remove all items from cart.
+
+
+* **Expected Behavior:** `EmptyStateComponent` render hota hai with "Browse Catalog" CTA; checkout button physically disable ho jata hai.
+
+
+
+
+
+#### 3. Business Value Achievement
+
+* Client-side zero lag cart interactions se cart abandonment kam hota hai aur reactive INR totals real-time visibility dete hain.
+
+
+
+---
+
+### Module 3: Checkout, Pessimistic Locking & Snapshot Orders (CHK/ORD)
+
+#### 1. Happy Path Scenario
+
+* **Goal:** Structured address form bhar kar order place karna, PostgreSQL par `SELECT FOR UPDATE` ke zariye inventory deduct hona, aur immutable financial snapshot create hona.
+
+
+* **Step 1: Structured Address & Checkout Submission**
+* **Method / Endpoint:** `POST /api/v1/orders`
+
+* **Headers:** Bearer Token (Customer A)
+
+
+* **Request Payload:**
+```json
+{
+  "shipping_address": "Flat 402, Green Valley, Baner, Pune, Maharashtra - 411045",
+  "payment_method": "COD",
+  "items": [
+    {
+      "product_id": "c1f727c9-4a0b-48d6-993d-82d778d9b1a2",
+      "quantity": 2
+    }
+  ]
+}
+
+```
+
+
+
+
+
+* **Expected Response (HTTP 201 Created):**
+
+```json
+{
+  "id": "e4b9a112-66cc-4a7b-a512-0f02b2c3d888",
+  "order_number": "ORD-B4A109E2",
+  "total_amount": 3198.00,
+  "currency": "INR",
+  "status": "PENDING",
+  "payment_method": "COD",
+  "payment_status": "PENDING",
+  "shipping_address": "Flat 402, Green Valley, Baner, Pune, Maharashtra - 411045",
+  "items": [
+    {
+      "id": "771e8a2b-1025-4ad8-a734-d2c6e61f9999",
+      "product_id": "c1f727c9-4a0b-48d6-993d-82d778d9b1a2",
+      "product_name": "ForgeStation Desktop Tower",
+      "product_sku": "COMP-002",
+      "unit_price": 1599.00,
+      "subtotal": 3198.00,
+      "quantity": 2
+    }
+  ]
+}
+
+```
+
+
+
+
+
+* **Step 2: Proof of Financial Snapshot Immutability**
+* **Database Mutation:** Admin database mein jakar `UPDATE products SET price = 2500.00 WHERE id = 'c1f727c9...'` execute kare.
+
+
+* **Verification Action:** `GET /api/v1/orders/e4b9a112-66cc-4a7b-a512-0f02b2c3d888` call karein.
+
+
+* **Observed Output:** Order item ka `unit_price` abhi bhi strictly **1599.00** hi rehta hai (0% retroactive corruption).
+
+
+
+
+
+#### 2. Exception Scenarios
+
+* **Exception Scenario A: Flash Sale Concurrency & Ghost Stock Depletion**
+* **Pre-condition:** Product `ELEC-005` ke inventory mein sirf 1 unit bacha hai.
+
+
+* **Action:** 2 customers ek sath 1-1 unit ka checkout trigger karein.
+
+
+* **Observed Behavior:**
+* Pehla customer acquire karta hai `SELECT ... FOR UPDATE` row lock, order successfully `201 Created` banata hai.
+
+
+* Doosre customer ki transaction lock release hone ke baad evaluate hoti hai aur turant abort hoti hai with **HTTP 400 Bad Request** (`{"detail": "Insufficient stock for product ELEC-005"}`).
+
+
+* Negative stock 0% generate hota hai.
+
+
+
+
+
+
+* **Exception Scenario B: IDOR Security Boundary Test**
+* **Action:** Customer A apne JWT token se Customer B ke order ko access karne ki koshish kare (`GET /api/v1/orders/{Order_of_Customer_B}`).
+
+
+* **Expected Response (HTTP 404 Not Found):**
+* System `HTTP 404 Not Found` deta hai (never 200, never leaking another customer's shipping address or payment data).
+
+
+
+
+
+
+
+#### 3. Business Value Achievement
+
+* Absolute financial ledger consistency, elimination of overselling during marketing flash sales, aur complete IDOR customer privacy compliance.
+
+
+
+---
+
+### Module 4: Admin Dashboard & Operations Engine (ADM)
+
+#### 1. Happy Path Scenario
+
+* **Goal:** Store Administrator login karke real-time aggregated metrics (Total Revenue, Active Products, Total Orders) aur recent orders table inspect kare.
+
+
+* **Step 1: Admin Authentication & Dashboard Query**
+* **Method / Endpoint:** `GET /api/v1/admin/dashboard`
+
+* **Headers:** Bearer Token (Admin Role)
+
+
+* **Expected Response (HTTP 200 OK):**
+
+```json
+{
+  "total_revenue": 145920.00,
+  "total_orders": 8,
+  "active_products": 30,
+  "recent_orders": [
+    {
+      "order_number": "ORD-B4A109E2",
+      "customer_email": "customer@example.com",
+      "total_amount": 3198.00,
+      "status": "PENDING",
+      "created_at": "2026-09-22T06:30:00Z"
+    }
+  ]
+}
+
+```
+
+
+
+
+
+* **Step 2: Order State Transition to Dispatched**
+* **Method / Endpoint:** `PATCH /api/v1/admin/orders/e4b9a112.../status`
+
+* **Payload:** `{"status": "SHIPPED"}`
+
+* **Expected Response (HTTP 200 OK):** Status successfully updates to `SHIPPED`.
+
+
+
+
+
+#### 2. Exception Scenarios
+
+* **Exception Scenario A: Unauthorized Customer Admin Probing (RBAC Guard)**
+* **Action:** Normal customer ke JWT token ke sath `GET /api/v1/admin/dashboard` hit karein.
+
+
+* **Expected Response (HTTP 403 Forbidden):**
+* FastAPI authorization dependency request ko drop kar deti hai: `{"detail": "Operation not permitted"}`.
+
+
+
+
+
+
+* **Exception Scenario B: Illegal Order State Transition**
+* **Action:** Order already `SHIPPED` hai; use wapas `PENDING` ya `CANCELLED` karne ka try karein.
+
+
+* **Expected Response (HTTP 400 Bad Request):**
+* State machine rejects illegal backwards transition.
+
+
+
+
+
+
+
+#### 3. Business Value Achievement
+
+* Single-pane operational visibility bina N+1 database bottlenecks ke, aur zero-trust role separation jo operational fraud prevent karta hai.
+
+
+
+---
+
+## 3. Automated Postman SIT Regression Runbook
+
+Har release se pehle automation collection execute karne ke steps:
+
+```
+[ Postman Collection Runner ]
+         │
+         ├── 1. POST /auth/login ────────► Captures 'accessToken' to Collection Env
+         ├── 2. GET /products ───────────► Captures first 'productId' and 'productSku'
+         ├── 3. POST /orders ────────────► Creates order, verifies 201 Created & snapshots
+         ├── 4. GET /admin/dashboard ────► Validates KPIs with Admin Bearer token
+         └── 5. PATCH /orders/{id}/status ► Asserts state transition & returns 200 OK
+
+```
+
+### Command-Line Execution via Newman
+
+```bash
+newman run Enterprise_Ecommerce_SIT.postman_collection.json \
+  -e Staging-Docker-Local.postman_environment.json \
+  --reporters cli,html \
+  --reporter-html-export sit_report.html
+
+```
+
+---
+
+## 4. Production Release Sign-Off Checklist
+
+* [x] All 30 seeded SVG vector product images resolve with `HTTP 200` and `image/svg+xml`.
+
+
+* [x] Cart total and item counts reactively update via Angular 19 Signals without layout shifts.
+
+
+* [x] Address submission strictly enforces 6-digit postal PIN regex (`^[1-9][0-9]{5}$`).
+
+
+* [x] Snapshot pricing confirmed: catalog price updates do NOT alter existing order items.
+
+
+* [x] Pessimistic locking (`SELECT FOR UPDATE`) eliminates overselling during concurrent checkouts.
+
+
+* [x] Customer access to `/admin/*` routes strictly blocked with `HTTP 403 Forbidden`.
+
+
+* [x] Cross-customer order access returns `HTTP 404 Not Found` (Zero IDOR leakage).
+
