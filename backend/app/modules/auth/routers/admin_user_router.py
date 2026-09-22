@@ -27,16 +27,16 @@ admin_user_router = APIRouter(prefix="/api/v1/admin/users", tags=["Admin Users"]
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(User).options(joinedload(User.role)).all()
     return [
-        UserResponse(
-            id=str(u.id),
-            email=u.email,
-            is_active=getattr(u, "is_active", True),
-            created_at=(
-                u.created_at.isoformat() 
-                if hasattr(u, "created_at") and getattr(u, "created_at") 
-                else datetime.now(timezone.utc).isoformat()
-            ),
-            role=u.role.name if getattr(u, "role", None) else "UNKNOWN"
-        )
-        for u in users
+UserResponse(
+        id=str(u.id),
+        email=u.email,
+        is_active=getattr(u, "is_active", True),
+        created_at=(
+            getattr(u, "created_at").isoformat()
+            if getattr(u, "created_at", None) is not None
+            else datetime.now(timezone.utc).isoformat()
+        ),
+        role=u.role.name if getattr(u, "role", None) else "UNKNOWN"
+    )
+    for u in users
     ]
