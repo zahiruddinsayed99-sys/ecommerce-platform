@@ -81,9 +81,9 @@ With Feature Freeze enacted for the Milestone 1 release, upcoming sprints will f
 
 ## 📚 Documentation
 For a deep dive into the platform, please review the following documentation files:
-*   [Functional Specifications](docs/Functional_Specifications.md): Detailed customer and admin workflows.
-*   [Technical Specifications](docs/Technical_Specifications.md): Database ERDs, API architecture, and integrations.
-*   [Functional Technical Map](docs/Functional_Technical_Map.md): Matrix connecting functional features to technical components.
-*   [Architecture Framework](docs/Architecture_Framework.md): System architecture and scalability considerations.
-*   [Operations Runbook](docs/RUNBOOK.md): Production maintenance procedures.
-*   [API Documentation](docs/API_DOCUMENTATION.md): Comprehensive API reference.
+*   [Functional Specifications](docs/Final V1/Functional_Specifications.md): Detailed customer and admin workflows.
+*   [Technical Specifications](docs/Final V1/Technical_Specifications.md): Database ERDs, API architecture, and integrations.
+*   [Functional Technical Map](docs/Final V1/Functional_Technical_Map.md): Matrix connecting functional features to technical components.
+*   [Architecture Framework](docs/Final V1/Architecture_Framework.md): System architecture and scalability considerations.
+*   [Operations Runbook](docs/Final V1/RUNBOOK.md): Production maintenance procedures.
+*   [API Documentation](docs/Final V1/API_DOCUMENTATION.md): Comprehensive API reference.
