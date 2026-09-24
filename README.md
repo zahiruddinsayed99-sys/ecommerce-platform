@@ -76,3 +76,14 @@ With Feature Freeze enacted for the Milestone 1 release, upcoming sprints will f
 *   **Pipeline Extension:** Integrating Continuous Deployment (CD) workflows into GitHub Actions for automated registry pushes.
 *   **Tooling Optimization:** Implementing ESLint, Prettier, and Husky for automated code quality enforcement.
 *   **Performance & A11y:** Resolving minor bundle/SCSS budget warnings and enhancing keyboard-only accessibility markers.
+
+---
+
+## 📚 Documentation
+For a deep dive into the platform, please review the following documentation files:
+*   [Functional Specifications](docs/Functional_Specifications.md): Detailed customer and admin workflows.
+*   [Technical Specifications](docs/Technical_Specifications.md): Database ERDs, API architecture, and integrations.
+*   [Functional Technical Map](docs/Functional_Technical_Map.md): Matrix connecting functional features to technical components.
+*   [Architecture Framework](docs/Architecture_Framework.md): System architecture and scalability considerations.
+*   [Operations Runbook](docs/RUNBOOK.md): Production maintenance procedures.
+*   [API Documentation](docs/API_DOCUMENTATION.md): Comprehensive API reference.
